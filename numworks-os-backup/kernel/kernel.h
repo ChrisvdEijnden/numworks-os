@@ -17,6 +17,8 @@ typedef struct {
     uint32_t        idle_count;
 } kernel_t;
 
+void  kernel_init(void);
+void  kernel_run(void);
 void  kernel_main(void);
 void  kernel_post_event(uint8_t key, uint8_t action);
 bool  kernel_event_get(kernel_event_t *out);

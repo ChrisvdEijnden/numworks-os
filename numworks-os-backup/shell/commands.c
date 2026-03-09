@@ -110,7 +110,7 @@ static void cmd_mem(void) {
                 (unsigned long)used, (unsigned long)free_b);
 }
 
-static void cmd_run(void) {
+static void cmd_run_script(void) {
     if (s_argc < 2) { shell_puts("Usage: run <file.py>\n"); return; }
     uint32_t off, sz;
     if (flashfs_open_read(s_argv[1], &off, &sz) < 0) {
@@ -145,7 +145,7 @@ static const cmd_entry_t s_cmds[] = {
     {"rm",     cmd_rm    },
     {"mkdir",  cmd_touch },  /* Alias — flat FS, dirs are prefix convention */
     {"echo",   cmd_echo  },
-    {"run",    cmd_run   },
+    {"run",    cmd_run_script },
     {"mem",    cmd_mem   },
     {"fm",     cmd_fm    },
     {"reboot", cmd_reboot},

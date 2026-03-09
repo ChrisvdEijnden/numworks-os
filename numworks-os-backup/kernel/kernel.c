@@ -11,16 +11,15 @@
  * Code size target: < 8 KB
  * ================================================================ */
 #include "kernel.h"
-#include "flashfs.h"
 #include "scheduler.h"
 #include "memory.h"
 #include "../hal/hal.h"
 #include "../hal/display.h"
 #include "../hal/keyboard.h"
 #include "../shell/shell.h"
-#include "../fs/fs.h"
 #include "../ui/filemanager.h"
 #include "../usb/usb_cdc.h"
+#include "../fs/flashfs.h"
 #include <string.h>
 
 /* ── Kernel state ─────────────────────────────────────────────── */
@@ -34,7 +33,41 @@ void SysTick_Handler(void) {
 }
 
 /* ================================================================
- * kernel_main — called from bootloader, never returns
+ * kernel_init — called from main() to set up kernel structures
+ * ================================================================ */
+void kernel_init(void) {
+    mem_init();
+    scheduler_init();
+    g_kernel.state     = KERNEL_BOOT;
+    g_kernel.app_state = APP_SHELL;
+    g_kernel.idle_count = 0;
+}
+
+/* ================================================================
+ * kernel_run — starts the cooperative event loop, never returns
+ * ================================================================ */
+void kernel_run(void) {
+    /* Register cooperative tasks */
+    scheduler_add_task("idle",    task_idle,    TASK_PRIO_IDLE);
+    scheduler_add_task("input",   task_input,   TASK_PRIO_NORMAL);
+    scheduler_add_task("display", task_display, TASK_PRIO_NORMAL);
+    scheduler_add_task("shell",   task_shell,   TASK_PRIO_NORMAL);
+
+    g_kernel.state = KERNEL_RUNNING;
+
+    /* ── Main event loop ─────────────────────────────────────── */
+    while (1) {
+        scheduler_run_next();
+
+        /* Enter sleep between events to save power */
+        if (scheduler_all_waiting()) {
+            __asm volatile("wfi");
+        }
+    }
+}
+
+/* ================================================================
+ * kernel_main — legacy entry kept for reference; not used by main.c
  * ================================================================ */
 void kernel_main(void) {
     /* Init subsystems in dependency order */

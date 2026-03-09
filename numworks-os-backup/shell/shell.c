@@ -19,11 +19,11 @@
 #include "../hal/display.h"
 #include "../hal/keyboard.h"
 #include "../hal/uart.h"
+#include "../hal/font.h"
 #include "../include/config.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdarg.h>
-#include "../hal/font.h"
 
 #define COLS    40
 #define ROWS    24
@@ -85,6 +85,8 @@ void shell_redraw(void) {
 
 /* ── Output ──────────────────────────────────────────────────── */
 void shell_puts(const char *s) {
+    /* Mirror to UART first, before we consume the pointer */
+    hal_uart_puts(s);
     /* Split on newlines, append to scrollback */
     while (*s) {
         int row = s_nlines % ROWS;
@@ -101,7 +103,6 @@ void shell_puts(const char *s) {
             if (*s == '\n') s++;
         }
     }
-    hal_uart_puts(s);  /* Mirror to UART */
     s_dirty = true;
 }
 
@@ -147,7 +148,7 @@ void shell_handle_event(const kernel_event_t *ev) {
     if (k == KEY_ALPHA) { s_alpha = !s_alpha; s_dirty = true; return; }
 
     /* Navigation */
-    if (k == KEY_EXE) { execute(); s_shift = false; s_alpha = false; return; }
+    if (k == KEY_EXE || k == KEY_OK) { execute(); s_shift = false; s_alpha = false; return; }
 
     if (k == KEY_BACKSPACE) {
         if (s_inlen > 0) s_input[--s_inlen] = 0;

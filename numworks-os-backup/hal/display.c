@@ -19,9 +19,9 @@
 /* Framebuffer — 320*240*2 = 153,600 bytes in .bss */
 uint16_t g_framebuf[LCD_WIDTH * LCD_HEIGHT];
 
-/* FSMC bank 1 addresses for NumWorks LCD */
+/* FSMC bank 1 addresses for NumWorks LCD: A16 is the RS (D/C) pin */
 #define LCD_CMD  (*(volatile uint16_t *)0x60000000UL)
-#define LCD_DATA (*(volatile uint16_t *)0x60040000UL)
+#define LCD_DATA (*(volatile uint16_t *)0x60020000UL)
 
 static void lcd_cmd(uint8_t cmd) { LCD_CMD = cmd; }
 static void lcd_data(uint16_t d) { LCD_DATA = d; }

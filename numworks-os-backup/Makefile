@@ -24,13 +24,21 @@ MCU     := -mcpu=$(CPU) -mthumb -mfpu=$(FPU) -mfloat-abi=$(FLOAT)
 # Source files
 SRCS_C := \
     main.c \
+    bootloader/boot.c \
     kernel/kernel.c \
+    kernel/scheduler.c \
+    kernel/memory.c \
     hal/hal.c \
     hal/display.c \
     hal/keyboard.c \
+    hal/uart.c \
+    hal/timer.c \
+    hal/clocks.c \
     fs/flashfs.c \
     shell/shell.c \
+    shell/commands.c \
     ui/filemanager.c \
+    ui/font.c \
     usb/usb_cdc.c \
     micropython-port/mp_port.c
 
@@ -38,6 +46,21 @@ SRCS_S := bootloader/startup_stm32f730.s
 
 OBJS := $(patsubst %.c,$(BUILD)/%.o,$(SRCS_C)) \
         $(patsubst %.s,$(BUILD)/%.o,$(SRCS_S))
+
+# Auto-detect arm-none-eabi newlib include path (needed on macOS with Homebrew)
+GCC_VERSION := $(shell $(CC) -dumpversion)
+GCC_SYSROOT := $(shell $(CC) -print-sysroot 2>/dev/null)
+GCC_LIBDIR  := $(shell $(CC) -print-file-name=include 2>/dev/null)
+
+# On macOS the compiler uses include_next to chain to a system stdint.h that
+# doesn't exist for bare-metal targets.  Supplying the newlib headers via
+# -isystem breaks the chain and provides the correct freestanding stdint.h.
+NEWLIB_INC  := $(GCC_SYSROOT)/include
+ifeq ($(wildcard $(NEWLIB_INC)/stdint.h),)
+  # Homebrew layout: sysroot is empty; headers live next to the compiler
+  CC_PREFIX   := $(shell dirname $(shell which $(CC)))
+  NEWLIB_INC  := $(CC_PREFIX)/../arm-none-eabi/include
+endif
 
 # Compiler flags
 CFLAGS := $(MCU) \
@@ -47,7 +70,8 @@ CFLAGS := $(MCU) \
     -fno-asynchronous-unwind-tables -fshort-enums \
     -Wall -Wextra -Wno-unused-parameter \
     -DSTM32F730xx -DARM_MATH_CM7 \
-    -Iinclude -Ihal -Ikernel -Ifs -Iusb \
+    -isystem /usr/local/Cellar/arm-gcc-bin@10/10.3-2021.10_1/arm-none-eabi/include \
+    -Iinclude -Ihal -Ikernel -Ifs -Iusb -Ishell -Iui -Ibootloader \
     -Imicropython-port \
     -Imicropython/ports/minimal \
     -Imicropython -Imicropython/py
@@ -59,14 +83,16 @@ else
 endif
 
 # Linker flags
-MP_LIB  := micropython-port/build/libmicropython.a
+MP_LIB  := micropython/ports/minimal/build/libmicropython.a
 LDFLAGS := $(MCU) \
     -T linker/numworks.ld \
     -Wl,--gc-sections \
     -Wl,-Map=$(BUILD)/$(TARGET).map,--cref \
     -nostartfiles \
-    -specs=nano.specs -specs=nosys.specs \
-    -lc -lgcc -lm $(MP_LIB)
+    -nodefaultlibs \
+    -L/usr/local/Cellar/arm-gcc-bin@10/10.3-2021.10_1/arm-none-eabi/lib/thumb/v7e-m+fp/hard \
+    -L/usr/local/Cellar/arm-gcc-bin@10/10.3-2021.10_1/lib/gcc/arm-none-eabi/10.3.1/thumb/v7e-m+fp/hard \
+    -lc -lm -lgcc
 
 .PHONY: all clean flash dfu size dump mp
 
@@ -95,10 +121,10 @@ size: $(BUILD)/$(TARGET).elf
 
 # Build MicroPython static library
 mp:
-    $(MAKE) -C micropython-port \
-        CROSS_COMPILE=$(CROSS) \
-        CFLAGS_EXTRA="-DMICROPY_CONFIG_FILE='\"mpconfigport.h\"'" \
-        libmicropython.a
+	$(MAKE) -C micropython/ports/minimal \
+	    CROSS_COMPILE=$(CROSS) \
+	    CFLAGS_EXTRA="-DMICROPY_CONFIG_FILE='\"../../micropython-port/mpconfigport.h\"'" \
+	    libmicropython.a
 
 # Flash via OpenOCD + ST-Link
 flash: $(BUILD)/$(TARGET).bin

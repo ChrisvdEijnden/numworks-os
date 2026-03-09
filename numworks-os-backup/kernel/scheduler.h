@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
-#include "config.h"
+#include "../include/config.h"
 
 #define TASK_PRIO_IDLE   0
 #define TASK_PRIO_LOW    1

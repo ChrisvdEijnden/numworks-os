@@ -9,8 +9,10 @@
  * Code size target: < 1 KB
  * ================================================================ */
 #include "memory.h"
-#include "config.h"
+#include "../include/config.h"
 #include <string.h>
+#include <stdbool.h>
+
 
 #define BLOCK_SIZE   64U
 #define NUM_BLOCKS   (MP_HEAP_SIZE / BLOCK_SIZE)  /* 128 blocks in heap area */

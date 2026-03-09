@@ -10,9 +10,11 @@ uint32_t hal_tick_ms(void);
 void     hal_delay_ms(uint32_t ms);
 
 /* Debug UART */
+void hal_uart_init(void);
 void hal_uart_putc(char c);
 void hal_uart_puts(const char *s);
 int  hal_uart_getc(void);
+int  hal_uart_available(void);
 
 /* LED / status */
 void hal_led_set(bool on);

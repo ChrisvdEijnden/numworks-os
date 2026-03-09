@@ -66,6 +66,7 @@ SECTIONS
     . = ORIGIN(DTCM) + LENGTH(DTCM) - 4;
     _estack = .;
   } >DTCM
+  /* _estack is the initial stack pointer — top of DTCM */
 
   _flash_fs_start = ORIGIN(FLASH_FS);
   _flash_fs_end   = ORIGIN(FLASH_FS) + LENGTH(FLASH_FS);

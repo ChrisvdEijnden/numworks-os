@@ -17,6 +17,7 @@ static uint8_t  s_rxhead = 0, s_rxtail = 0;
 void hal_uart_init(void) {
     /* Clock USART1 + GPIOA */
     RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
 
     /* PA9 = TX (AF7), PA10 = RX (AF7) */
     /* MODER: AF mode = 10b */
@@ -30,8 +31,8 @@ void hal_uart_init(void) {
     USART1->BRR = (uint32_t)(APB2_HZ / DEBUG_BAUD);
     USART1->CR1 = USART_CR1_UE | USART_CR1_TE | USART_CR1_RE | USART_CR1_RXNEIE;
 
-    /* Enable USART1 IRQ */
-    nvic_enable(37);  /* USART1 IRQ = 37 on STM32F7 */
+    /* Enable USART1 IRQ in NVIC */
+    nvic_enable(37);  /* USART1 global IRQ = 37 on STM32F7 */
 }
 
 /* RX interrupt */

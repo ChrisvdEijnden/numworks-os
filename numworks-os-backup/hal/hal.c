@@ -1,7 +1,5 @@
-/* ================================================================
- * NumWorks OS — HAL Initialization
- * File: hal/hal.c
- * ================================================================ */
+/* hal_init: initialises debug UART. Display, keyboard, and timer
+ * are initialised separately by main() to allow splash ordering. */
 #include "hal.h"
 #include "uart.h"
 #include "timer.h"

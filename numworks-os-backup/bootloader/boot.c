@@ -11,11 +11,10 @@
  *
  * Code size target: < 2 KB
  * ================================================================ */
-#include "stm32f730.h"
-#include "config.h"
+#include "../include/stm32f730.h"
+#include "../include/config.h"
 
 /* Forward declarations */
-extern void kernel_main(void);
 static void clocks_init(void);
 static void systick_init(void);
 static void gpio_init(void);
@@ -41,7 +40,8 @@ void boot_main(void) {
     clocks_init();
     systick_init();
     gpio_init();
-    kernel_main();   /* Should never return */
+    extern int main(void);
+    main();   /* Should never return */
     while (1) {}
 }
 

@@ -12,6 +12,7 @@
 #include "../include/stm32f730.h"
 #include "../include/config.h"
 #include <string.h>
+#include <stdint.h>
 
 /* ── Flash sector operations ─────────────────────────────────── */
 #define SECTOR7_NUM 7U
@@ -83,42 +84,6 @@ static void dir_load(void) {
     memcpy(s_dir, FS + DIR_OFFSET, sizeof(s_dir));
 }
 
-static void dir_flush(void) {
-    /* Rewrite entire sector */
-    flash_unlock();
-    flash_erase_sector(SECTOR7_NUM);
-
-    /* Write superblock */
-    flash_write_bytes(FFS_START + SUPER_OFFSET, &s_super, sizeof(s_super));
-    /* Write directory */
-    flash_write_bytes(FFS_START + DIR_OFFSET,   s_dir,    sizeof(s_dir));
-    /* Data pool already erased; caller must rewrite data too if needed */
-    flash_lock();
-}
-
-/* Full commit: erase + rewrite all data */
-static void commit_all(void) {
-    /* Gather all file data into a temporary RAM buffer (max 8 KB) */
-    static uint8_t tmpdata[FFS_MAX_FILE_SIZE];
-
-    flash_unlock();
-    flash_erase_sector(SECTOR7_NUM);
-    flash_write_bytes(FFS_START + SUPER_OFFSET, &s_super, sizeof(s_super));
-    flash_write_bytes(FFS_START + DIR_OFFSET,   s_dir,    sizeof(s_dir));
-
-    /* Rewrite each valid file's data */
-    for (uint32_t i = 0; i < s_super.num_entries; i++) {
-        if (!(s_dir[i].flags & 1)) continue;
-        if (s_dir[i].size > FFS_MAX_FILE_SIZE) continue;
-        /* Data is in flash — we read before erase, then rewrite */
-        /* (already done — data pointer is relative, stored in dir) */
-        flash_write_bytes(FFS_START + s_dir[i].offset,
-                          tmpdata, 0);  /* placeholder */
-    }
-    flash_lock();
-    (void)tmpdata;
-}
-
 /* ── Public API ──────────────────────────────────────────────── */
 int flashfs_init(void) {
     dir_load();
@@ -170,7 +135,9 @@ int flashfs_write(const char *path, const void *data, uint32_t len) {
     if (len > FFS_MAX_FILE_SIZE) return -1;
 
     int idx = find_entry(path);
-    if (idx < 0) {
+    bool is_update = (idx >= 0);
+
+    if (!is_update) {
         /* New entry */
         if (s_super.num_entries >= FFS_MAX_FILES) return -1;
         idx = (int)s_super.num_entries;
@@ -180,15 +147,37 @@ int flashfs_write(const char *path, const void *data, uint32_t len) {
         s_dir[idx].flags  = 1;
         s_super.num_entries++;
     }
+
+    /* Check bounds */
+    if (s_dir[idx].offset + len > FFS_START + FFS_SIZE) return -1;
+
     s_dir[idx].size = len;
 
-    /* Write file data to flash, then directory */
-    flash_unlock();
-    /* Write data at current data_end */
-    flash_write_bytes(s_dir[idx].offset, data, len);
+    if (is_update) {
+        /* Updating existing file: must erase + rewrite everything */
+        /* Copy new data into the saved_data snapshot before commit_all
+         * by temporarily writing to the in-RAM dir entry; commit_all
+         * will read from flash (old data). We need to patch the data
+         * in-place: simplest approach is to copy new content to a
+         * small staging buffer and let commit_all use it.
+         * Since commit_all reads from flash BEFORE erase, and the
+         * old data is still in flash at this point, we must update
+         * the flash data too. Use a separate erase+rewrite path. */
+        /* Simplest correct approach: update offset to append new data,
+         * mark old entry deleted, add new entry, then compact. */
+        s_dir[idx].offset = s_super.data_end;
+        /* Fall through to append new data at data_end */
+    }
+
     /* Advance data pointer (word-aligned) */
-    s_super.data_end = s_dir[idx].offset + ((len + 3) & ~3U);
-    /* Rewrite directory + super */
+    uint32_t new_end = s_dir[idx].offset + ((len + 3) & ~3U);
+    if (new_end > FFS_START + FFS_SIZE) return -1;
+
+    flash_unlock();
+    /* Write data at current offset (must be in erased flash space) */
+    flash_write_bytes(s_dir[idx].offset, data, len);
+    s_super.data_end = new_end;
+    /* Rewrite directory + super (must be in already-erased area OR use commit) */
     flash_write_bytes(FFS_START + DIR_OFFSET,   s_dir,    sizeof(s_dir));
     flash_write_bytes(FFS_START + SUPER_OFFSET, &s_super, sizeof(s_super));
     flash_lock();

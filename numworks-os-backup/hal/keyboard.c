@@ -55,13 +55,13 @@ static void kbuf_push(key_code_t k, uint8_t act) {
 }
 
 void keyboard_init(void) {
-    /* Rows: push-pull output */
+    /* Rows: push-pull output, initially HIGH (deasserted) */
     for (int r = 0; r < NROWS; r++) {
         GPIO_TypeDef *p = ROW_PORTS[r];
         uint32_t pin = ROW_PINS[r];
         p->MODER &= ~(3U << (pin*2));
         p->MODER |=  (1U << (pin*2));  /* output */
-        p->BSRR   = (1U << (pin+16));  /* low */
+        p->BSRR   = (1U << pin);       /* high = deasserted */
     }
     /* Cols: input with pull-up */
     for (int c = 0; c < NCOLS; c++) {
@@ -90,7 +90,7 @@ static void keyboard_scan(void) {
                 if (pressed != s_state[r][c]) {
                     s_state[r][c] = pressed;
                     if (s_matrix[r][c] != KEY_NONE)
-                        kbuf_push(s_matrix[r][c], pressed ? 0 : 1);
+                        kbuf_push(s_matrix[r][c], pressed ? 0 : 1);  /* 0=press, 1=release */
                 }
             }
             s_debounce[r][c] = pressed;
@@ -117,11 +117,8 @@ bool keyboard_is_pressed(key_code_t k) {
 
 /* Convert key to ASCII character */
 char key_to_char(key_code_t k, bool shift, bool alpha) {
-    static const char normal[] = "0123456789.+-*/^";
-    static const char letters[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     if (k >= KEY_0 && k <= KEY_9) {
-        char c = '0' + (k - KEY_0);
-        return alpha ? 0 : c;
+        return alpha ? 0 : (char)('0' + (k - KEY_0));
     }
     if (k == KEY_PLUS)  return '+';
     if (k == KEY_MINUS) return '-';
@@ -129,11 +126,10 @@ char key_to_char(key_code_t k, bool shift, bool alpha) {
     if (k == KEY_DIV)   return '/';
     if (k == KEY_DOT)   return '.';
     if (k == KEY_SPACE) return ' ';
-    if (k == KEY_A && alpha) return shift ? 'A' : 'a';
     if (k >= KEY_A && k <= KEY_Z) {
-        char base = alpha ? (shift ? 'A' : 'a') : 0;
-        return base ? (char)(base + (k - KEY_A)) : 0;
+        if (!alpha) return 0;
+        char base = shift ? 'A' : 'a';
+        return (char)(base + (k - KEY_A));
     }
-    (void)normal; (void)letters;
     return 0;
 }

@@ -6,23 +6,23 @@
 #include "hal/hal.h"
 #include "hal/display.h"
 #include "hal/keyboard.h"
+#include "hal/timer.h"
 #include "kernel/kernel.h"
-#include "fs/fs.h"
+#include "fs/flashfs.h"
 #include "shell/shell.h"
 #include "ui/filemanager.h"
 #include "usb/usb_cdc.h"
 #include "include/config.h"
 #include <string.h>
 
-
 /* ── Boot splash screen ───────────────────────────────────── */
 static void boot_splash(uint32_t ms_start) {
     display_fill(BLACK);
 
     /* Logo / title */
-    display_str(60, 60,  "NumWorks OS",     CYAN, BLACK);
+    display_str(60, 60,  "NumWorks OS",     WHITE,  BLACK);
     display_str(60, 76,  "v0.1 - nwos",     GREY,   BLACK);
-    display_str(30, 100, "STM32F730 / 192MHz", GREY, BLACK);
+    display_str(30, 100, "STM32F730 / 216MHz", GREY, BLACK);
     display_str(30, 116, "256KB RAM / 512KB Flash", GREY, BLACK);
 
     /* Progress bar outline */
@@ -33,7 +33,7 @@ static void boot_splash(uint32_t ms_start) {
         elapsed = hal_tick_ms() - ms_start;
         int progress = (int)(elapsed * 240 / 1200);
         if (progress > 240) progress = 240;
-        display_rect(40, 160, progress, 12, CYAN);
+        display_fill_rect(41, 161, progress, 10, BLUE);
     } while (elapsed < 1200);
 }
 
@@ -48,22 +48,22 @@ int main(void) {
 
     /* 1. Hardware init (clock, SysTick, GPIO, display, keyboard) */
     hal_init();
+    display_init();
+    keyboard_init();
+    hal_timer_init();
     boot_start = hal_tick_ms();
 
     /* 2. Kernel init (events, memory pools) */
-    kernel_main();
+    kernel_init();
 
     /* 3. Filesystem init */
-    fs_err_t fserr = fs_init();
-    if (fserr != FS_OK) {
+    int fserr = flashfs_init();
+    if (fserr != 0) {
         /* Flash FS corrupt — display error and format */
         display_fill(BLACK);
-        display_str(0, 0, "FS init failed — formatting...", RED, BLACK);
+        display_str(0, 0, "FS init failed -- formatting...", RED, BLACK);
         hal_delay_ms(800);
-        fs_format();
-        /* Create default directories */
-        fs_mkdir("/scripts");
-        fs_mkdir("/data");
+        flashfs_format();
     }
 
     /* 4. USB CDC init */
@@ -77,34 +77,29 @@ int main(void) {
 
     /* 7. Create default welcome script if not present */
     {
-        fs_stat_t st;
-        if (fs_stat("/scripts/hello.py", &st) != FS_OK) {
-            fs_file_t *f = fs_open("/scripts/hello.py",
-                                   FS_O_WRONLY|FS_O_CREAT);
-            if (f) {
-                const char *hello =
-                    "# Welcome to NumWorks OS!\n"
-                    "import display\n"
-                    "display.fill(display.BLACK)\n"
-                    "display.text('Hello from Python!', 60, 100,\n"
-                    "             display.GREEN, display.BLACK)\n";
-                fs_write(f, hello, strlen(hello));
-                fs_close(f);
-            }
+        if (!flashfs_exists("/scripts/hello.py")) {
+            const char *hello =
+                "# Welcome to NumWorks OS!\n"
+                "import display\n"
+                "display.fill(display.BLACK)\n"
+                "display.str(60, 100, 'Hello from Python!', display.WHITE, display.BLACK)\n"
+                "display.flush()\n";
+            flashfs_write("/scripts/hello.py", hello, (uint32_t)strlen(hello));
         }
     }
 
     /* 8. Choose startup mode */
     if (toolbox_held_at_boot()) {
         /* TOOLBOX held → launch file manager directly */
-        fm_init(); fm_redraw();
+        kernel_set_app(APP_FILEMANAGER);
+        fm_redraw();
     } else {
         /* Default → shell */
         shell_init();
     }
 
     /* 9. Kernel event loop — never returns */
-    // kernel already running
+    kernel_run();
 
     /* Should never reach here */
     return 0;
@@ -131,12 +126,12 @@ int _write(int fd, char *ptr, int len) {
 }
 
 /* Heap for newlib malloc (we use our own, but provide _sbrk stub) */
-extern char _heap_start, _heap_end;
+extern char _sheap, _eheap;
 static char *heap_ptr = NULL;
 void *_sbrk(int incr) {
-    if (!heap_ptr) heap_ptr = &_heap_start;
+    if (!heap_ptr) heap_ptr = &_sheap;
     char *prev = heap_ptr;
-    if (heap_ptr + incr > &_heap_end) {
+    if (heap_ptr + incr > &_eheap) {
         errno = ENOMEM;
         return (void*)-1;
     }
@@ -147,7 +142,6 @@ void *_sbrk(int incr) {
 void _exit(int code) {
     (void)code;
     /* Reset the MCU */
-    extern void REG(uint32_t);
     *((volatile uint32_t*)0xE000ED0C) = 0x05FA0004UL;
     while(1) {}
 }
