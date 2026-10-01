@@ -4,7 +4,6 @@
  * ================================================================ */
 #include "kernel.h"
 #include "scheduler.h"
-#include "memory.h"
 #include "../hal/hal.h"
 #include "../hal/display.h"
 #include "../hal/keyboard.h"
@@ -26,15 +25,15 @@
 
 static kernel_t  g_kernel;
 static volatile bool s_redraw_pending = false;
-extern volatile uint32_t g_tick_ms;
+extern volatile uint32_t g_tick_ms, g_tick_step;
+static uint32_t s_last_input;   /* tick of the last key press */
 
 void SysTick_Handler(void) {
-    g_tick_ms++;
+    g_tick_ms += g_tick_step;
     scheduler_tick();
 }
 
 void kernel_init(void) {
-    mem_init();
     scheduler_init();
     g_kernel.state      = KERNEL_BOOT;
     g_kernel.app_state  = APP_HOME;
@@ -48,6 +47,7 @@ void kernel_run(void) {
     scheduler_add_task("app",     task_shell,   TASK_PRIO_NORMAL);
 
     g_kernel.state = KERNEL_RUNNING;
+    s_last_input = g_tick_ms;
 
     /* Each task sleeps one tick after it runs; when none is ready the
      * idle task puts the CPU to sleep until the next interrupt. */
@@ -66,14 +66,48 @@ void task_idle(void) {
     __asm volatile("cpsid i" ::: "memory");
     if (!scheduler_ready_above(TASK_PRIO_IDLE)) __asm volatile("wfi");
     __asm volatile("cpsie i" ::: "memory");
-    scheduler_yield();
+}
+
+/* ── Sleep ─────────────────────────────────────────────────────
+ * ON/OFF, or no key press for AUTO_SLEEP_MS, turns the screen off and
+ * slows SysTick to one tick per SLEEP_TICK_MS, so the CPU (waiting in
+ * WFI) wakes 50 times a second instead of 1000. Only the keyboard and
+ * the PC transfer protocol are serviced; ON/OFF wakes up. */
+#define SLEEP_TICK_MS 20
+
+static void power_sleep(void) {
+    hal_uart_puts("sleep\n");
+    display_power(false);
+    hal_tick_set_period(SLEEP_TICK_MS);
+    for (;;) {
+        hal_delay_ms(SLEEP_TICK_MS);
+        key_event_t ev;
+        bool wake = false;
+        while (keyboard_poll(&ev))
+            if (ev.key == KEY_ONOFF && ev.action == 0) wake = true;
+        if (wake) break;
+        usb_cdc_process();
+    }
+    hal_tick_set_period(1);
+    display_power(true);
+    hal_uart_puts("wake\n");
+    /* Keys queued before sleeping are stale */
+    kernel_event_t stale;
+    while (kernel_event_get(&stale)) {}
+    s_last_input = g_tick_ms;
+    kernel_request_redraw();
 }
 
 void task_input(void) {
     key_event_t ev;
     while (keyboard_poll(&ev)) {
+        if (ev.action == 0) {
+            s_last_input = g_tick_ms;
+            if (ev.key == KEY_ONOFF) { power_sleep(); break; }
+        }
         kernel_post_event(ev.key, ev.action);
     }
+    if (g_tick_ms - s_last_input >= AUTO_SLEEP_MS) power_sleep();
     scheduler_sleep(1);
 }
 

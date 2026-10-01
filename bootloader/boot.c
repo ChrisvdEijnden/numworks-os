@@ -11,6 +11,7 @@
  *
  * Code size target: < 2 KB
  * ================================================================ */
+#include <stdbool.h>
 #include "../include/stm32f730.h"
 #include "../include/config.h"
 
@@ -21,24 +22,22 @@ static void icache_enable(void);
 static void systick_init(void);
 static void gpio_init(void);
 
-/* Tick counter — updated by SysTick_Handler in kernel */
+/* Tick counter — updated by SysTick_Handler in kernel/kernel.c */
 volatile uint32_t g_tick_ms = 0;
+volatile uint32_t g_tick_step = 1;   /* ms per SysTick (more while asleep) */
 
-/* ── SysTick IRQ (declared weak so kernel can override) ──────── */
-__attribute__((weak)) void SysTick_Handler(void) {
-    g_tick_ms++;
-}
-
-/* ── Simple busy-wait ────────────────────────────────────────── */
-void delay_ms(uint32_t ms) {
-    uint32_t start = g_tick_ms;
-    while ((g_tick_ms - start) < ms) { __asm volatile("wfe"); }
-}
+/* Whether the PLL runs from the crystal (false: HSI fallback) */
+bool g_boot_hse = false;
 
 /* ================================================================
  * boot_main — entry from startup.s
  * ================================================================ */
 void boot_main(void) {
+    extern void hal_stack_paint(void);
+    hal_stack_paint();      /* first, so `mem` can report the stack peak */
+    /* Report MemManage, BusFault and UsageFault as themselves rather
+     * than as a HardFault (SCB->SHCSR) */
+    *(volatile uint32_t *)0xE000ED24UL |= (1U << 16) | (1U << 17) | (1U << 18);
     clocks_init();
     mpu_init();
     icache_enable();
@@ -94,6 +93,7 @@ static void clocks_init(void) {
             break;
         }
     }
+    g_boot_hse = (pllsrc != 0);
 
     /* PLLM=1 MHz in, PLLN=432, PLLP=/2 → 216 MHz, PLLQ=/9 → 48 MHz */
     RCC->PLLCFGR = (RCC->PLLCFGR & ~RCC_PLLCFGR_MASK)

@@ -29,12 +29,14 @@ SRCS_C := \
     bootloader/boot.c \
     kernel/kernel.c \
     kernel/scheduler.c \
-    kernel/memory.c \
     hal/hal.c \
     hal/display.c \
     hal/keyboard.c \
     hal/uart.c \
     hal/timer.c \
+    hal/syscalls.c \
+    hal/led.c \
+    hal/fault.c \
     hal/clocks.c \
     fs/flashfs.c \
     fs/ff.c \
@@ -42,6 +44,7 @@ SRCS_C := \
     shell/shell.c \
     shell/commands.c \
     ui/filemanager.c \
+    ui/line_input.c \
     ui/font.c \
     usb/usb_cdc.c \
     usb/usb_host.c \
@@ -162,7 +165,9 @@ MP_CORE_SRCS := $(wildcard $(MP_EMBED)/py/*.c) \
                 $(MP_EMBED)/shared/runtime/gchelper_generic.c \
                 $(MP_EMBED)/port/embed_util.c
 MP_GLUE_SRCS := micropython-port/modules/nwos/moddisplay.c \
-                micropython-port/modules/nwos/nwos_open.c
+                micropython-port/modules/nwos/nwos_open.c \
+                micropython-port/modules/nwos/modtime.c \
+                micropython-port/modules/nwos/modrandom.c
 SRCS_C += $(MP_CORE_SRCS) $(MP_GLUE_SRCS)
 OBJS   += $(patsubst %.c,$(BUILD)/%.o,$(MP_CORE_SRCS) $(MP_GLUE_SRCS))
 
@@ -180,6 +185,8 @@ MP_CFLAGS := $(MCU) -std=gnu99 -Os -ffunction-sections -fdata-sections \
 $(patsubst %.c,$(BUILD)/%.o,$(MP_CORE_SRCS)): CFLAGS := $(MP_CFLAGS) -w
 $(patsubst %.c,$(BUILD)/%.o,$(MP_GLUE_SRCS) micropython-port/mp_port.c): \
     CFLAGS := $(MP_CFLAGS) -Wall -Wextra -Wno-unused-parameter
+# The embed port's nlr_jump_fail() hangs; ours shows the crash screen
+MP_LDFLAGS := -Wl,--wrap=nlr_jump_fail
 endif
 
 .PHONY: all clean distclean flash dfu size dump mp phi delta openocd help restore print-libs print-newlib
@@ -211,7 +218,7 @@ $(BUILD)/%.o: %.s
 
 $(BUILD)/$(TARGET).elf: $(OBJS)
 	@echo "  LD  $@"
-	@$(LD) $(OBJS) $(LDFLAGS) -o $@
+	@$(LD) $(OBJS) $(LDFLAGS) $(MP_LDFLAGS) -o $@
 
 $(BUILD)/$(TARGET).bin: $(BUILD)/$(TARGET).elf
 	@$(OBJCOPY) -O binary $< $@

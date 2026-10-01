@@ -175,6 +175,23 @@ bool keyboard_poll(key_event_t *ev) {
     return true;
 }
 
+/* Whether any key is down right now, read straight from the matrix:
+ * no debouncing, no events, no SysTick. For the crash screen. */
+bool keyboard_raw_any(void) {
+    for (int r = 0; r < NROWS; r++) {
+        if (!(s_row_ok & (1U << r))) continue;
+        GPIO_TypeDef *rp = ROW_PORTS[r];
+        uint32_t rpin = ROW_PINS[r];
+        rp->BSRR = (1U << (rpin + 16));
+        for (volatile int d = 0; d < 200; d++) {}
+        uint32_t idr = COL_PORT->IDR;
+        rp->BSRR = (1U << rpin);
+        for (int c = 0; c < NCOLS; c++)
+            if ((s_col_ok & (1U << c)) && !((idr >> COL_PINS[c]) & 1)) return true;
+    }
+    return false;
+}
+
 bool keyboard_is_pressed(key_code_t k) {
     for (int r = 0; r < NROWS; r++)
         for (int c = 0; c < NCOLS; c++)

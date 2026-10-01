@@ -6,7 +6,6 @@
 /* RGB565 colour helpers */
 #define RGB(r,g,b) ((uint16_t)(((r)&0xF8)<<8 | ((g)&0xFC)<<3 | (b)>>3))
 #define BLACK   RGB(0,0,0)
-#define GRAY   0x8410
 #define WHITE   RGB(255,255,255)
 #define RED     RGB(220,20,20)
 #define GREEN   RGB(20,200,20)
@@ -17,9 +16,10 @@
 #define CYAN    RGB(0,200,220)
 
 void display_init(void);
+bool display_ready(void);      /* true once display_init() has run */
+void display_power(bool on);   /* panel sleep; the backlight pin isn't known yet */
 void display_flush(void);   /* push the whole framebuffer to the LCD now */
 void display_update(void);  /* push it only if something was drawn since */
-void display_splash(void);
 
 /* Drawing primitives */
 void display_fill(uint16_t colour);

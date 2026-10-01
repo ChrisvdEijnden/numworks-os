@@ -10,13 +10,10 @@
 #include "shell.h"
 #include "../fs/flashfs.h"
 #include "../kernel/kernel.h"
-#include "../kernel/memory.h"
+#include "../hal/hal.h"
 #include "../micropython-port/mp_port.h"
 #include "../include/string.h"
 #include "../include/stdlib.h"
-
-/* cat and run never run at the same time: one file buffer for both */
-static char s_filebuf[FFS_MAX_FILE_SIZE+1];
 
 /* ── Argument parsing (no malloc) ────────────────────────────── */
 #define MAX_ARGS 8
@@ -72,10 +69,15 @@ static void cmd_cat(void) {
     if (flashfs_open_read(s_argv[1], &off, &sz) < 0) {
         shell_print("cat: %s: not found\n", s_argv[1]); return;
     }
-    if (sz > FFS_MAX_FILE_SIZE) sz = FFS_MAX_FILE_SIZE;
-    flashfs_read(off, s_filebuf, sz);
-    s_filebuf[sz] = 0;
-    shell_puts(s_filebuf);
+    /* In pieces: no buffer for the whole file */
+    char chunk[129];
+    for (uint32_t pos = 0; pos < sz; ) {
+        uint32_t n = sz - pos < 128 ? sz - pos : 128;
+        if (flashfs_read(off + pos, chunk, n) != (int)n) { shell_puts("\ncat: read error"); break; }
+        chunk[n] = 0;
+        shell_puts(chunk);
+        pos += n;
+    }
     shell_putc('\n');
 }
 
@@ -102,34 +104,43 @@ static void cmd_echo(void) {
     shell_putc('\n');
 }
 
+static void count_cb(const ffs_entry_t *e, void *ctx) { (void)e; (*(int *)ctx)++; }
+
 static void cmd_mem(void) {
-    uint32_t used, free_b;
-    mem_stats(&used, &free_b);
-    shell_print("RAM heap:  %lu B used, %lu B free\n",
-                (unsigned long)used, (unsigned long)free_b);
-    flashfs_stats(&used, &free_b);
-    shell_print("Flash FS:  %lu B used, %lu B free\n",
-                (unsigned long)used, (unsigned long)free_b);
+    uint32_t a, b;
+    hal_stack_stats(&a, &b);
+    shell_print("Stack:  %lu / %lu B (piek)\n", (unsigned long)a, (unsigned long)b);
+    hal_heap_stats(&a, &b);
+    shell_print("C-heap: %lu / %lu B\n", (unsigned long)a, (unsigned long)b);
+    if (mp_heap_stats(&a, &b))
+        shell_print("Python: %lu / %lu B\n", (unsigned long)a, (unsigned long)b);
+    else
+        shell_puts("Python: niet ingebouwd\n");
+    if (flashfs_mounted()) {
+        int n = 0;
+        flashfs_ls(count_cb, &n);
+        flashfs_stats(&a, &b);
+        shell_print("Flash:  %lu / %lu B, %d bestand(en)\n",
+                    (unsigned long)a, (unsigned long)(a + b), n);
+    } else {
+        shell_puts("Flash:  geen opslag\n");
+    }
 }
 
 static void cmd_run_script(void) {
     if (s_argc < 2) { shell_puts("Usage: run <file.py>\n"); return; }
-    uint32_t off, sz;
-    if (flashfs_open_read(s_argv[1], &off, &sz) < 0) {
+    if (!flashfs_exists(s_argv[1])) {
         shell_print("run: %s: not found\n", s_argv[1]); return;
     }
-    if (sz > FFS_MAX_FILE_SIZE) { shell_puts("run: file too large\n"); return; }
-    flashfs_read(off, s_filebuf, sz);
-    s_filebuf[sz] = 0;
     shell_print("Running: %s\n", s_argv[1]);
-    mp_exec_str(s_filebuf);
+    mp_set_console(NULL);                 /* output and input() in the shell */
+    mp_exec_file(s_argv[1]);
+    mp_pause_after_graphics();
+    kernel_request_redraw();
 }
 
 static void cmd_reboot(void) {
-    /* SCB AIRCR software reset */
-    volatile uint32_t *aircr = (volatile uint32_t *)0xE000ED0CUL;
-    *aircr = (0x5FAUL << 16) | (1U << 2);
-    while (1) {}
+    hal_reset();
 }
 
 static void cmd_fm(void) {

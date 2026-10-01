@@ -8,7 +8,8 @@
  *  - Edit with full keypad input (ALPHA mode for letters)
  *  - Save back to internal FS (SHIFT+EXE)
  *  - New file creation
- *  - Scrolling viewport for files > 24 lines
+ *  - Files up to the file system's limit (8 KB)
+ *  - Scrolls vertically and horizontally to keep the cursor in view
  * ================================================================ */
 #include "text_editor.h"
 #include "../../hal/display.h"
@@ -24,16 +25,17 @@
 #define C_LINE RGB(20,20,32)
 #define HEADER_H 24
 #define FOOTER_H 14
-#define COLS     EDITOR_COLS
-#define ROWS     EDITOR_ROWS
 #define CHAR_W   7
 #define CHAR_H   10
-#define MAX_B    EDITOR_MAX_BYTES
+#define COLS     ((LCD_WIDTH - 2) / CHAR_W)                    /* 45 */
+#define ROWS     ((LCD_HEIGHT - HEADER_H - FOOTER_H) / CHAR_H) /* 20 */
+#define MAX_B    ((int)EDITOR_MAX_BYTES)
 
 static char  s_text[MAX_B+1];
 static int   s_tlen = 0;
 static int   s_cpos = 0;  /* cursor byte position */
 static int   s_scroll = 0;  /* top visible line */
+static int   s_hscroll = 0; /* first visible column */
 static char  s_filename[FFS_NAME_LEN] = "";
 static bool  s_modified = false;
 static bool  s_shift = false;
@@ -74,26 +76,26 @@ static void draw_line(int linenum, bool active) {
     uint16_t bg = active ? C_LINE : C_BG;
     display_fill_rect(0, y, LCD_WIDTH, CHAR_H, bg);
 
+    /* The visible part: columns s_hscroll .. s_hscroll+COLS-1 */
     int ls = line_start(linenum);
+    int le = ls;
+    while (le < s_tlen && s_text[le] != '\n') le++;
     char linebuf[COLS+1];
-    int col = 0;
-    for (int i=ls; i<s_tlen && s_text[i]!='\n' && col<COLS; i++,col++)
-        linebuf[col] = s_text[i];
-    linebuf[col] = 0;
+    int n = 0;
+    for (int i = ls + s_hscroll; i < le && n < COLS; i++)
+        linebuf[n++] = s_text[i];
+    linebuf[n] = 0;
+    display_str_len(0, y, linebuf, n, RGB(220,230,255), bg);
 
-    /* Cursor within this line */
-    int cur_col = -1;
+    /* More text to the left or right: a thin marker at that edge */
+    if (s_hscroll > 0 && le - ls > 0)
+        display_fill_rect(0, y + 2, 1, CHAR_H - 4, RGB(120,120,160));
+    if (le - ls > s_hscroll + COLS)
+        display_fill_rect(LCD_WIDTH - 1, y + 2, 1, CHAR_H - 4, RGB(120,120,160));
+
     if (active) {
-        int ls2 = line_start(linenum);
-        cur_col = s_cpos - ls2;
-        if (cur_col < 0 || cur_col > col) cur_col = col;
-    }
-
-    display_str(0, y, linebuf, RGB(220,230,255), bg);
-
-    if (cur_col >= 0) {
-        int cx = cur_col * CHAR_W;
-        display_fill_rect(cx, y, 2, CHAR_H, C_CURS);
+        int cx = (s_cpos - ls - s_hscroll) * CHAR_W;
+        if (cx >= 0 && cx < LCD_WIDTH) display_fill_rect(cx, y, 2, CHAR_H, C_CURS);
     }
 }
 
@@ -115,6 +117,10 @@ static void draw_bars(void) {
              s_filename[0]?s_filename:"[nieuw]",
              s_modified?" *":"");
     display_str(6, 6, hdr, WHITE, C_HDR);
+    int cl = cursor_line();
+    char pos[24];
+    int pn = snprintf(pos, sizeof(pos), "r%d k%d", cl + 1, s_cpos - line_start(cl) + 1);
+    display_str((int16_t)(LCD_WIDTH - 6 - pn * CHAR_W), 6, pos, RGB(200,220,255), C_HDR);
 
     display_fill_rect(0, LCD_HEIGHT-FOOTER_H, LCD_WIDTH, FOOTER_H, RGB(25,25,40));
     char foot[64];
@@ -150,7 +156,7 @@ bool text_editor_open(const char *name) {
     s_tlen = (int)sz; s_text[sz] = 0;
     strncpy(s_filename, name, FFS_NAME_LEN-1);
     s_filename[FFS_NAME_LEN-1] = 0;
-    s_cpos=0; s_scroll=0; s_modified=false;
+    s_cpos=0; s_scroll=0; s_hscroll=0; s_modified=false;
     s_status = "";
     return true;
 }
@@ -172,7 +178,7 @@ static void save_file(void) {
 }
 
 static void insert_char(char c) {
-    if (s_tlen >= MAX_B) return;
+    if (s_tlen >= MAX_B) { s_status = "Bestand vol (max 8 KB)"; return; }
     memmove(s_text+s_cpos+1, s_text+s_cpos, s_tlen-s_cpos+1);
     s_text[s_cpos++] = c;
     s_tlen++;
@@ -227,7 +233,7 @@ static void naming_key(key_code_t k) {
 }
 
 void text_editor_new(void) {
-    s_tlen=0; s_cpos=0; s_scroll=0; s_modified=false;
+    s_tlen=0; s_cpos=0; s_scroll=0; s_hscroll=0; s_modified=false;
     s_filename[0]=0; s_text[0]=0;
     s_naming = false; s_status = "";
 }
@@ -275,10 +281,14 @@ void text_editor_handle_event(const kernel_event_t *ev) {
         if (c) { insert_char(c); s_shift=false; }
     }
 
-    /* Scroll to keep cursor visible */
+    /* Scroll to keep the cursor visible. Scrolling left keeps a few
+     * columns of context to the left of the cursor. */
     cl = cursor_line();
     if (cl < s_scroll) s_scroll = cl;
     if (cl >= s_scroll + ROWS) s_scroll = cl - ROWS + 1;
+    int cc = s_cpos - line_start(cl);
+    if (cc < s_hscroll) s_hscroll = cc > 8 ? cc - 8 : 0;
+    if (cc >= s_hscroll + COLS) s_hscroll = cc - COLS + 1;
 
     draw_all();
     draw_bars();

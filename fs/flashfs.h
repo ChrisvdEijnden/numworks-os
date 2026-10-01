@@ -63,10 +63,14 @@ void flashfs_set_scratch(void *buf, uint32_t len, void (*released)(void));
 
 int  flashfs_open_read(const char *path, uint32_t *offset, uint32_t *size);
 int  flashfs_read(uint32_t offset, void *buf, uint32_t len);
+/* A file's contents in place (the flash is memory-mapped). Valid until
+ * the next write, delete or rename, which may compact the sector. */
+bool flashfs_map(const char *path, const char **data, uint32_t *size);
 int  flashfs_write(const char *path, const void *data, uint32_t len);
 int  flashfs_delete(const char *path);
 int  flashfs_rename(const char *from, const char *to);
 bool flashfs_exists(const char *path);
+bool flashfs_mounted(void);
 
 int  flashfs_ls(void (*cb)(const ffs_entry_t *e, void *ctx), void *ctx);
 void flashfs_stats(uint32_t *used, uint32_t *free_bytes);

@@ -22,7 +22,5 @@ void  scheduler_init(void);
 void  scheduler_add_task(const char *name, task_fn_t fn, uint8_t prio);
 void  scheduler_run_next(void);
 void  scheduler_tick(void);
-void  scheduler_yield(void);
-bool  scheduler_all_waiting(void);
 void  scheduler_sleep(uint8_t ticks);         /* current task skips `ticks` SysTicks */
 bool  scheduler_ready_above(uint8_t prio);    /* a task above `prio` can run now */

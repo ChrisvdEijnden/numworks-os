@@ -7,20 +7,26 @@
  *   display.fill_rect(x, y, w, h, colour)
  *   display.rgb(r, g, b) -> colour
  *   display.flush()                          show what was drawn
+ *
+ * Once a script draws, the console stays off the screen until the
+ * script ends, and the drawing stays up until a key is pressed.
  *   display.BLACK WHITE RED GREEN BLUE YELLOW CYAN GREY
  * ================================================================ */
 #include "py/runtime.h"
 #include "../../../hal/display.h"
+#include "../../mp_port.h"
 
 static mp_int_t arg_int(mp_obj_t o) { return mp_obj_get_int(o); }
 
 static mp_obj_t py_fill(mp_obj_t colour) {
+    nwos_mp_display_used();
     display_fill((uint16_t)arg_int(colour));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(py_fill_obj, py_fill);
 
 static mp_obj_t py_str(size_t n_args, const mp_obj_t *args) {
+    nwos_mp_display_used();
     uint16_t fg = n_args > 3 ? (uint16_t)arg_int(args[3]) : WHITE;
     uint16_t bg = n_args > 4 ? (uint16_t)arg_int(args[4]) : BLACK;
     display_str((int16_t)arg_int(args[0]), (int16_t)arg_int(args[1]),
@@ -30,12 +36,14 @@ static mp_obj_t py_str(size_t n_args, const mp_obj_t *args) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(py_str_obj, 3, 5, py_str);
 
 static mp_obj_t py_pixel(mp_obj_t x, mp_obj_t y, mp_obj_t colour) {
+    nwos_mp_display_used();
     display_pixel((int16_t)arg_int(x), (int16_t)arg_int(y), (uint16_t)arg_int(colour));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(py_pixel_obj, py_pixel);
 
 static mp_obj_t py_fill_rect(size_t n_args, const mp_obj_t *args) {
+    nwos_mp_display_used();
     (void)n_args;
     display_fill_rect((int16_t)arg_int(args[0]), (int16_t)arg_int(args[1]),
                       (int16_t)arg_int(args[2]), (int16_t)arg_int(args[3]),
@@ -50,6 +58,7 @@ static mp_obj_t py_rgb(mp_obj_t r, mp_obj_t g, mp_obj_t b) {
 static MP_DEFINE_CONST_FUN_OBJ_3(py_rgb_obj, py_rgb);
 
 static mp_obj_t py_flush(void) {
+    nwos_mp_display_used();
     display_flush();
     return mp_const_none;
 }

@@ -9,11 +9,88 @@
 #include "../include/config.h"
 
 extern volatile uint32_t g_tick_ms;
+extern bool g_boot_hse;
+
+/* RCC_CSR reset flags (RM0431 §5.3.21); RMVF clears them */
+#define RCC_CSR (*(volatile uint32_t *)(RCC_BASE + 0x74UL))
+#define RCC_CSR_RMVF (1U << 24)
+
+static const char *reset_cause(uint32_t csr) {
+    if (csr & (1U << 29)) return "watchdog (IWDG)";
+    if (csr & (1U << 30)) return "watchdog (WWDG)";
+    if (csr & (1U << 31)) return "low-power";
+    if (csr & (1U << 28)) return "software (reboot or crash)";
+    if (csr & (1U << 25)) return "power on / brown-out";
+    if (csr & (1U << 26)) return "reset pin";
+    return "unknown";
+}
 
 void hal_init(void) {
     /* UART for debug output */
     hal_uart_init();
     hal_uart_puts("\r\nNumWorks OS v" NWOS_VERSION " booting...\r\n");
+    hal_uart_puts("reset cause: ");
+    hal_uart_puts(reset_cause(RCC_CSR));
+    hal_uart_puts(g_boot_hse ? "\nclock: 216 MHz from HSE\n"
+                             : "\nclock: 216 MHz from HSI (crystal did not start)\n");
+    RCC_CSR |= RCC_CSR_RMVF;
+}
+
+void hal_boot_log(const char *stage) {
+    char ms[11];
+    uint32_t v = g_tick_ms;
+    int i = 10;
+    ms[i] = 0;
+    do { ms[--i] = (char)('0' + v % 10); v /= 10; } while (v && i > 0);
+    hal_uart_puts("[boot ");
+    for (int pad = 10 - i; pad < 5; pad++) hal_uart_putc(' ');
+    hal_uart_puts(ms + i);
+    hal_uart_puts(" ms] ");
+    hal_uart_puts(stage);
+    hal_uart_putc('\n');
+}
+
+/* ── Stack high-water mark ───────────────────────────────────────
+ * The stack grows down from _estack to _sstack. At boot everything
+ * below the current stack pointer is filled with a pattern; the lowest
+ * word that no longer holds it is the deepest the stack has been. */
+#define STACK_PAINT 0x5A7AC4EDUL
+extern uint32_t _sstack[], _estack[];
+
+void hal_stack_paint(void) {
+    uint32_t *sp;
+    __asm volatile("mov %0, sp" : "=r"(sp));
+    for (uint32_t *p = _sstack; p < sp - 16; p++) *p = STACK_PAINT;
+}
+
+void hal_stack_stats(uint32_t *peak, uint32_t *size) {
+    uint32_t *p = _sstack;
+    while (p < _estack && *p == STACK_PAINT) p++;
+    if (peak) *peak = (uint32_t)((_estack - p) * sizeof(uint32_t));
+    if (size) *size = (uint32_t)((_estack - _sstack) * sizeof(uint32_t));
+}
+
+/* g_tick_ms keeps counting milliseconds: each tick adds the period */
+void hal_tick_set_period(uint32_t ms) {
+    extern volatile uint32_t g_tick_step;
+    if (ms < 1) ms = 1;
+    if (ms > 70) ms = 70;                       /* 24-bit reload at 216 MHz */
+    SysTick->CTRL &= ~SysTick_CTRL_ENABLE;
+    SysTick->LOAD = (SYSCLK_HZ / 1000U) * ms - 1U;
+    SysTick->VAL  = 0;
+    g_tick_step   = ms;
+    SysTick->CTRL |= SysTick_CTRL_ENABLE;
+}
+
+/* The millisecond count plus how far SysTick is into the current tick */
+uint32_t hal_tick_us(void) {
+    uint32_t ms, val;
+    do {
+        ms  = g_tick_ms;
+        val = SysTick->VAL;
+    } while (ms != g_tick_ms);                  /* a tick came in between */
+    /* SysTick counts CPU cycles down from LOAD */
+    return ms * 1000U + (SysTick->LOAD - val) / (SYSCLK_HZ / 1000000U);
 }
 
 uint32_t hal_tick_ms(void) {
@@ -25,12 +102,4 @@ void hal_delay_ms(uint32_t ms) {
     while ((g_tick_ms - start) < ms) {
         __asm volatile("wfi");
     }
-}
-
-void hal_led_set(bool on) {
-    /* NumWorks has no user LED, but PA15 can be used */
-    if (on)
-        GPIOA->BSRR = (1U << 15);
-    else
-        GPIOA->BSRR = (1U << (15 + 16));
 }

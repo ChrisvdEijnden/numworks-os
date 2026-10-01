@@ -7,6 +7,7 @@
 #include "hal/display.h"
 #include "hal/keyboard.h"
 #include "hal/timer.h"
+#include "hal/led.h"
 #include "kernel/kernel.h"
 #include "fs/flashfs.h"
 #include "shell/shell.h"
@@ -85,12 +86,16 @@ int main(void) {
     /* 1. HAL init */
     hal_init();
     display_init();
+    hal_boot_log("display");
     keyboard_init();
+    hal_boot_log("keyboard");
     hal_timer_init();
+    led_init();
     boot_start = hal_tick_ms();
 
-    /* 2. Kernel + memory */
+    /* 2. Kernel */
     kernel_init();
+    hal_boot_log("kernel");
 
     /* 3. Flash FS. When it has to compact, it borrows the framebuffer as
      *    scratch space and the current app is redrawn afterwards. */
@@ -109,6 +114,8 @@ int main(void) {
         display_flush();
         hal_delay_ms(1500);
     }
+    hal_boot_log(fs == FFS_OK ? "flashfs: mounted" :
+                 fs == FFS_ERR_FORMAT ? "flashfs: formatted" : "flashfs: no storage");
 
     /* 4. USB CDC (virtual serial for PC transfer) */
     usb_cdc_init();
@@ -118,6 +125,7 @@ int main(void) {
 
     /* 6. MicroPython */
     mp_init_port();
+    hal_boot_log("micropython");
 
     /* 7. Boot splash */
     boot_splash(boot_start);
@@ -135,6 +143,7 @@ int main(void) {
 
     /* 9. Init all app modules */
     app_init_all();
+    hal_boot_log("apps; starting event loop");
 
     /* 10. Start at Home (or Shell if HOME held) */
     if (home_held_at_boot()) {
@@ -148,39 +157,3 @@ int main(void) {
 
     return 0;
 }
-
-/* ── Newlib stubs ─────────────────────────────────────────────── */
-#include <sys/stat.h>
-#include <errno.h>
-#undef errno
-extern int errno;
-int errno;
-
-int _close(int fd)                          { (void)fd; return -1; }
-int _fstat(int fd, struct stat *st)         { (void)fd; st->st_mode = S_IFCHR; return 0; }
-int _isatty(int fd)                         { (void)fd; return 1; }
-int _lseek(int fd, int ptr, int dir)        { (void)fd;(void)ptr;(void)dir; return 0; }
-int _read(int fd, char *ptr, int len)       { (void)fd;(void)ptr;(void)len; return 0; }
-int _write(int fd, char *ptr, int len) {
-    (void)fd;
-    for (int i = 0; i < len; i++) shell_putc(ptr[i]);
-    return len;
-}
-
-extern char _sheap, _eheap;
-static char *heap_ptr = NULL;
-void *_sbrk(int incr) {
-    if (!heap_ptr) heap_ptr = &_sheap;
-    char *prev = heap_ptr;
-    if (heap_ptr + incr > &_eheap) { errno = ENOMEM; return (void*)-1; }
-    heap_ptr += incr;
-    return (void*)prev;
-}
-
-void _exit(int code) {
-    (void)code;
-    *((volatile uint32_t*)0xE000ED0C) = 0x05FA0004UL;
-    while(1) {}
-}
-int _kill(int pid, int sig) { (void)pid; (void)sig; return -1; }
-int _getpid(void)           { return 1; }

@@ -28,6 +28,7 @@ typedef struct {
 
 void keyboard_init(void);
 bool keyboard_poll(key_event_t *ev);  /* Returns true if event ready */
+bool keyboard_raw_any(void);   /* unfiltered matrix read, for fault handlers */
 bool keyboard_is_pressed(key_code_t k);
 
 /* OK and EXE both confirm: always test for "execute" with this */

@@ -45,8 +45,8 @@ make -j4
 ```
 
 Run `make mp` again after changing `mpconfigport.h` or the modules in
-`micropython-port/modules/`. `make distclean` removes the generated
-package.
+`micropython-port/modules/`, and after updating this repository (if
+either changed). `make distclean` removes the generated package.
 
 ## FatFs (optional, for USB drives)
 

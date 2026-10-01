@@ -182,21 +182,6 @@ int usb_host_ls(char names[][32], int maxn) {
     return n;
 }
 
-int usb_host_read_file(const char *name, uint8_t *buf,
-                       uint32_t maxlen, uint32_t *size_out) {
-    if (!s_mounted) return -1;
-    char path[48];
-    snprintf(path, sizeof(path), "1:/%s", name);
-    FIL  fp;
-    UINT br;
-    if (f_open(&fp, path, FA_READ) != FR_OK) return -1;
-    FRESULT fr = f_read(&fp, buf, maxlen, &br);
-    f_close(&fp);
-    if (fr != FR_OK) return -1;
-    *size_out = br;
-    return 0;
-}
-
 int usb_host_read_at(const char *name, uint32_t offset, uint8_t *buf,
                      uint32_t len, uint32_t *got) {
     if (!s_mounted) return -1;
@@ -211,12 +196,4 @@ int usb_host_read_at(const char *name, uint32_t offset, uint8_t *buf,
     if (fr != FR_OK) return -1;
     *got = br;
     return 0;
-}
-
-int usb_host_import(const char *usb_name, const char *dest_name) {
-    static uint8_t buf[8192];
-    uint32_t sz = 0;
-    if (usb_host_read_file(usb_name, buf, sizeof(buf), &sz) < 0) return -1;
-    extern int flashfs_write(const char *, const void *, uint32_t);
-    return flashfs_write(dest_name, buf, sz);
 }

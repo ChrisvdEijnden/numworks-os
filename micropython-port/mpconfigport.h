@@ -18,8 +18,10 @@
 #define MICROPY_PY_BUILTINS_STR_SPLITLINES (1)
 #define MICROPY_PY_SYS                  (1)
 #define MICROPY_PY_SYS_PLATFORM         "numworks"
-#define MICROPY_PY_BUILTINS_INPUT       (0)   /* no line input from the keypad yet */
-#define MICROPY_ENABLE_EXTERNAL_IMPORT  (0)   /* no importing files from flash yet */
+#define MICROPY_PY_BUILTINS_INPUT       (1)   /* input() reads a line from the keypad */
+#define MICROPY_ENABLE_EXTERNAL_IMPORT  (1)   /* `import x` loads x.py from flash */
+/* `time` and `random` are our own modules (modules/nwos/), since the
+ * embed port doesn't ship MicroPython's extmod ones */
 
 /* BACK (or HOME) interrupts a running script with KeyboardInterrupt:
  * every MICROPY_VM_HOOK_COUNT jumps/returns the VM calls nwos_mp_poll(). */

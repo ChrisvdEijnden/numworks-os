@@ -1,13 +1,24 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include "fault.h"
 
-/* Subsystem init */
+/* Subsystem init: debug UART, then the boot banner and reset cause */
 void hal_init(void);
+
+/* One line on the debug UART: "[boot   123 ms] <stage>" */
+void hal_boot_log(const char *stage);
+
+/* Memory: stack high-water mark (stack is painted at boot), C heap */
+void     hal_stack_paint(void);
+void     hal_stack_stats(uint32_t *peak, uint32_t *size);
+void     hal_heap_stats(uint32_t *used, uint32_t *total);
 
 /* Timing */
 uint32_t hal_tick_ms(void);
+uint32_t hal_tick_us(void);                  /* microseconds, wraps every ~71 min */
 void     hal_delay_ms(uint32_t ms);
+void     hal_tick_set_period(uint32_t ms);   /* SysTick period, 1..70 ms */
 
 /* Debug UART */
 void hal_uart_init(void);
@@ -15,6 +26,3 @@ void hal_uart_putc(char c);
 void hal_uart_puts(const char *s);
 int  hal_uart_getc(void);
 int  hal_uart_available(void);
-
-/* LED / status */
-void hal_led_set(bool on);

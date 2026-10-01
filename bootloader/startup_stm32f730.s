@@ -123,12 +123,27 @@ zero_bss_chk:
 
 /* ── Default / fault handlers ───────────────────────────────────
  * Every vector must have its Thumb bit set, so handlers are declared
- * with .thumb_func / .thumb_set rather than as bare labels.        */
+ * with .thumb_func / .thumb_set rather than as bare labels.
+ *
+ * Faults and unexpected interrupts go to fault_report(frame, ipsr) in
+ * hal/fault.c, which shows a crash screen and never returns. If the
+ * stack is (nearly) used up it gets a fresh one at the top first; the
+ * stacked frame is then far below it, so it isn't overwritten.     */
     .thumb_func
     .global Default_Handler
     .type   Default_Handler, %function
 Default_Handler:
-    b       .   /* Spin — attach debugger to read fault registers */
+    tst     lr, #4                  /* EXC_RETURN: which stack was in use */
+    ite     eq
+    mrseq   r0, msp
+    mrsne   r0, psp
+    mrs     r1, ipsr
+    ldr     r2, =_sstack + 1024
+    cmp     r0, r2
+    bhs     1f
+    ldr     r2, =_estack
+    msr     msp, r2
+1:  b       fault_report
     .size   Default_Handler, . - Default_Handler
 
     .thumb_func

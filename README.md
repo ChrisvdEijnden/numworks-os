@@ -21,14 +21,14 @@ manager, a text editor and Tetris.
 | **Rekenmachine** | Calculator | Scientific calculator, `Ans`, inverse functions | Works (native evaluator) |
 | **Functies** | Functions | Up to 4 functions: graph (pan/zoom), table; edit/delete | Works |
 | **Vergelijkingen** | Equations | Quadratic, 2×2 linear system, f(x)=0 (Newton) | Works |
-| **Python** | Python REPL | MicroPython: `math`, `display`, read-only `open()` | Needs `make mp` |
+| **Python** | Python REPL | MicroPython: multi-line blocks, `input()`, import your own `.py` files, `math`, `time`, `random`, `display`, read-only `open()` | Needs `make mp` |
 | **Bestanden** | File manager | Open in editor, new file, delete (SHIFT twice) | Works |
 | **Shell** | Shell | `ls cat touch rm echo run mem fm reboot`; also over UART | Works |
 | **Tetris** | Tetris | Classic Tetris | Works |
 | **Docs** | Docs | Built-in reference | Works |
-| **Instellingen** | Settings | LED, version, reboot | LED pin unverified, "white" = red |
+| **Instellingen** | Settings | RGB LED, version, reboot | LED off until its pins are set in `config.h` |
 | **Foto's** | Photo viewer | 24-bit BMP from a USB drive | Needs USB host + FatFs (missing) |
-| **Editor** | Text editor | Edit files up to 4 KB, asks a name for new files | Works |
+| **Editor** | Text editor | Files up to 8 KB, scrolls sideways for long lines, asks a name for new files | Works |
 | PC transfer | `tools/upload.py` | List, upload, download, delete files | Protocol done, USB stack missing |
 
 ## Keys
@@ -41,7 +41,15 @@ Navigate with the arrow keys, **OK** (or **EXE**) opens or confirms,
 - In text fields (shell, editor, Python), **ALPHA** types the letters
   printed on the keys; SHIFT+ALPHA types capitals. **SHIFT** alone
   types `[ ] { } = _ < > #` on `( ) × ÷ + − . 0 ,`.
+- In Python, a line that opens a block (`def`, `for`, `if`, ...)
+  continues on the next line, indented for you; an empty line runs the
+  block. **UP** recalls the previous line.
 - In a running Python script, **BACK** raises `KeyboardInterrupt`.
+- **ON/OFF** turns the screen off (and so does 5 minutes without a key
+  press); ON/OFF turns it back on. The backlight pin isn't known yet,
+  so the backlight itself stays on.
+- After a crash the screen shows the fault and its address; any key
+  restarts. The same report goes to the debug UART.
 
 ## Home screen
 
@@ -72,14 +80,17 @@ numworks-os/
 ├── bootloader/
 │   ├── startup_stm32f730.s     Vector table + Reset_Handler
 │   └── boot.c                  Clocks (216 MHz), MPU, I-cache, SysTick
-├── kernel/                     Event loop, scheduler, pool allocator
-├── hal/                        LCD, keyboard, UART, timer
+├── kernel/                     Event loop, scheduler, sleep
+├── hal/                        LCD, keyboard, UART, timer, LED,
+│                               crash screen, newlib stubs
 ├── fs/
 │   ├── flashfs.c/h             Flash file system (append-only log)
 │   ├── ff.c / ff.h             FatFs stub (replace with real FatFs)
 │   └── diskio.c/h              FatFs drive glue (drive 1 = USB)
 ├── shell/                      Terminal UI + commands
-├── ui/filemanager.c            File manager
+├── ui/
+│   ├── filemanager.c           File manager
+│   └── line_input.c            Blocking line input (Python's input())
 ├── usb/
 │   ├── usb_cdc.c/h             PC transfer protocol (USB stack missing)
 │   └── usb_host.c/h            USB host skeleton (not started at boot)
@@ -87,7 +98,8 @@ numworks-os/
 │   ├── mp_port.c/h             MicroPython glue
 │   ├── mpconfigport.h          MicroPython configuration
 │   ├── micropython_embed.mk    Used by `make mp`
-│   └── modules/nwos/           `display` module, builtin open()
+│   ├── shared/readline/        input() hook (replaces MicroPython's)
+│   └── modules/nwos/           `display`, `time`, `random`, open()
 ├── apps/
 │   ├── common/expr.c/h         Expression evaluator (math apps)
 │   └── <app>/                  One directory per app

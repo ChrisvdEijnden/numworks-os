@@ -13,6 +13,7 @@
  * ================================================================ */
 #include "display.h"
 #include "font.h"
+#include "hal.h"
 #include "../include/stm32f730.h"
 #include "../include/string.h"
 
@@ -21,6 +22,7 @@ uint16_t g_framebuf[LCD_WIDTH * LCD_HEIGHT] __attribute__((section(".framebuf"))
 
 /* Set by every drawing primitive, cleared by display_flush() */
 static bool s_dirty = false;
+static bool s_ready = false;
 
 /* FSMC bank 1 addresses for NumWorks LCD: A16 is the RS (D/C) pin */
 #define LCD_CMD  (*(volatile uint16_t *)0x60000000UL)
@@ -58,6 +60,24 @@ void display_init(void) {
 
     memset(g_framebuf, 0x00, sizeof(g_framebuf));
     display_flush();
+    s_ready = true;
+}
+
+bool display_ready(void) { return s_ready; }
+
+/* ILI9341 display off + sleep in, and back. The backlight stays on:
+ * its control pin hasn't been checked against a schematic yet. */
+void display_power(bool on) {
+    if (on) {
+        lcd_cmd(0x11);                 /* sleep out: wait 120 ms */
+        hal_delay_ms(120);
+        lcd_cmd(0x29);                 /* display on */
+        display_flush();
+    } else {
+        lcd_cmd(0x28);                 /* display off */
+        lcd_cmd(0x10);                 /* sleep in: wait 5 ms */
+        hal_delay_ms(5);
+    }
 }
 
 /* Push entire framebuffer to LCD */
@@ -120,11 +140,14 @@ void display_char(int16_t x, int16_t y, char ch, uint16_t fg, uint16_t bg) {
     }
 }
 
+/* Text that reaches the right edge continues on the next line, at the
+ * same x it started at. */
 void display_str(int16_t x, int16_t y, const char *s, uint16_t fg, uint16_t bg) {
+    const int16_t x0 = x;
     while (*s) {
+        if (x + FONT_W > LCD_WIDTH && x > x0) { x = x0; y += FONT_H + 2; }
         display_char(x, y, *s++, fg, bg);
         x += FONT_W + 1;
-        if (x + FONT_W >= LCD_WIDTH) { x = 0; y += FONT_H + 2; }
     }
 }
 
@@ -133,14 +156,4 @@ void display_str_len(int16_t x, int16_t y, const char *s, int len,
     for (int i = 0; i < len && s[i]; i++) {
         display_char(x + i*(FONT_W+1), y, s[i], fg, bg);
     }
-}
-
-void display_splash(void) {
-    display_fill(BLACK);
-    display_fill_rect(0, 0, LCD_WIDTH, 30, BLUE);
-    display_str(10, 8, "NumWorks OS  v" NWOS_VERSION, WHITE, BLUE);
-    display_str(10, 50, "Booting...", GREEN, BLACK);
-    display_str(10, 70, "216 MHz ARM Cortex-M7", GREY, BLACK);
-    display_flush();
-    for (volatile int i = 0; i < 3000000; i++) {}
 }

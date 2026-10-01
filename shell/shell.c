@@ -20,6 +20,7 @@
 #include "../hal/keyboard.h"
 #include "../hal/uart.h"
 #include "../hal/font.h"
+#include "../ui/line_input.h"
 #include "../include/config.h"
 #include "../include/string.h"
 #include "../include/stdio.h"
@@ -80,6 +81,31 @@ static void draw_input(void) {
     if (s_inlen > INPUT_VISIBLE) tail += s_inlen - INPUT_VISIBLE;
     snprintf(prompt, sizeof(prompt), "%c %s_", mode, tail);
     display_str(2, INPUT_Y, prompt, YELLOW, DKGREY);
+}
+
+/* For Python's input(): the line being typed, after a "?" */
+static void draw_read_line(const char *text, bool shift, bool alpha) {
+    draw_output();
+    display_fill_rect(0, INPUT_Y - 2, LCD_WIDTH, INPUT_H, DKGREY);
+    char line[SHELL_LINE_LEN + 4];
+    size_t n = strlen(text);
+    const char *tail = n > INPUT_VISIBLE ? text + n - INPUT_VISIBLE : text;
+    snprintf(line, sizeof(line), "%c %s_", alpha ? (shift ? 'A' : 'a') : (shift ? '^' : '?'), tail);
+    display_str(2, INPUT_Y, line, CYAN, DKGREY);
+}
+
+bool shell_read_line(char *buf, int max) {
+    return line_input(buf, max, draw_read_line);
+}
+
+/* Draw and push to the LCD now: a Python script runs inside one key
+ * handler, so the kernel doesn't get to update the screen meanwhile */
+void shell_show(void) {
+    if (kernel_get_app() != APP_SHELL) return;
+    draw_output();
+    draw_input();
+    display_flush();
+    s_dirty = false;
 }
 
 void shell_redraw(void) {

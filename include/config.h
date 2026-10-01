@@ -58,9 +58,15 @@
 #define HOME_ICON_W         88
 #define HOME_ICON_H         56
 
-/* ── LED / Lamp GPIO (N0120 — PE3 via TIM1 PWM) ────────────── */
-#define LED_GPIO_PORT_NUM   4         /* GPIOE */
-#define LED_GPIO_PIN        3
+/* ── RGB status LED (hal/led.c) ─────────────────────────────────
+ * Not known for this board yet, so the LED stays off. To enable it, set
+ * LED_CONFIGURED to 1 and define the three cathode pins from the
+ * schematic (port number: 0=A, 1=B, ...):
+ *   #define LED_R_PORT_NUM 1
+ *   #define LED_R_PIN      4      ... and the same for G and B
+ * Don't guess: the original code drove PE3, which on the N0110 is
+ * believed to be the charger's status output. */
+#define LED_CONFIGURED      0
 
 /* ── Tetris ─────────────────────────────────────────────────── */
 #define TETRIS_BOARD_W      10
@@ -68,6 +74,8 @@
 #define TETRIS_CELL_SZ      10
 
 /* ── Text editor ────────────────────────────────────────────── */
-#define EDITOR_COLS         40
-#define EDITOR_ROWS         24
-#define EDITOR_MAX_BYTES    (4U * 1024U)
+#define EDITOR_MAX_BYTES    FFS_MAX_FILE_SIZE   /* any file the FS can hold */
+
+/* ── Power ──────────────────────────────────────────────────── */
+/* Screen off after this long without a key press (ON/OFF wakes) */
+#define AUTO_SLEEP_MS       (5U * 60U * 1000U)

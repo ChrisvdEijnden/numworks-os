@@ -327,6 +327,13 @@ int flashfs_open_read(const char *path, uint32_t *offset, uint32_t *size) {
     return 0;
 }
 
+bool flashfs_map(const char *path, const char **data, uint32_t *size) {
+    uint32_t offset;
+    if (flashfs_open_read(path, &offset, size) != 0) return false;
+    *data = (const char *)(uintptr_t)offset;
+    return true;
+}
+
 int flashfs_read(uint32_t offset, void *buf, uint32_t len) {
     if (offset < FFS_START + DATA_OFFSET || offset > FS_END ||
         len > FS_END - offset) return -1;
@@ -394,6 +401,10 @@ int flashfs_rename(const char *from, const char *to) {
         return 0;
     }
     return compact(MOD_RENAME, from, NULL, 0, to);
+}
+
+bool flashfs_mounted(void) {
+    return s_mounted;
 }
 
 bool flashfs_exists(const char *path) {
