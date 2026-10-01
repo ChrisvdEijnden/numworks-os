@@ -155,6 +155,8 @@ The code in this repository is MIT licensed (see `LICENSE`).
 MicroPython (`make mp`) keeps its own license (MIT); the `random`
 module is adapted from MicroPython's.
 
-Earlier versions of this repository contained a dump of NumWorks'
-firmware (`epsilon-qspi-backup.bin`). It was removed: it isn't ours to
-distribute, and it couldn't restore a calculator anyway.
+Early versions of this repository contained a dump of NumWorks'
+firmware (`epsilon-qspi-backup.bin`). It isn't ours to distribute, and
+it couldn't restore a calculator anyway, so it was removed and the
+repository's history was rewritten without it. If you cloned before
+that, delete your clone and clone again.

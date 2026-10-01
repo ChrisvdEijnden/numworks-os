@@ -108,11 +108,12 @@ SWD probe.
 
 ### Restore Official Firmware
 
-Don't use the `epsilon-qspi-backup.bin` that earlier versions of this
-repository contained. The first 108 KB of that dump (0x0–0x1AFFF) is an
-old build of this OS, not the Epsilon kernel, so it can't boot. Don't write `epsilon.bin` to `0x08000000`
-either: that is internal flash, where NumWorks' bootloader lives;
-Epsilon itself lives in the external flash.
+If you have the `epsilon-qspi-backup.bin` that early clones of this
+repository contained, don't use it: its first 108 KB (0x0–0x1AFFF) are
+an old build of this OS, not the Epsilon kernel, so it can't boot. Don't
+write `epsilon.bin` to `0x08000000` either: that is internal flash,
+where NumWorks' bootloader lives; Epsilon itself lives in the external
+flash.
 
 Use NumWorks' own recovery instead, which reinstalls a complete, signed
 firmware:
