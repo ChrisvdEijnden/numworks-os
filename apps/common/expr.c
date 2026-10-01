@@ -36,6 +36,8 @@ static const struct { const char *name; fn1_t fn; } FUNCS[] = {
     {"abs",  fabs},
 };
 
+static double s_ans = 0.0;
+
 static double parse_expr(parser_t *ps);
 static double parse_unary(parser_t *ps);
 
@@ -95,6 +97,7 @@ static double parse_primary(parser_t *ps) {
         if (n == 1 && s[0] == 'x') return ps->x;
         if (n == 1 && s[0] == 'e') return M_E;
         if (n == 2 && strncmp(s, "pi", 2) == 0) return M_PI;
+        if (n == 3 && strncmp(s, "ans", 3) == 0) return s_ans;
         for (size_t i = 0; i < sizeof(FUNCS) / sizeof(FUNCS[0]); i++) {
             if (strlen(FUNCS[i].name) == n && strncmp(s, FUNCS[i].name, n) == 0) {
                 skip_ws(ps);
@@ -165,6 +168,8 @@ static double parse_expr(parser_t *ps) {
     return v;
 }
 
+void expr_set_ans(double v) { s_ans = v; }
+
 expr_status_t expr_eval(const char *src, double x, double *out) {
     parser_t ps = { src, x, 0, EXPR_OK };
     skip_ws(&ps);
@@ -199,7 +204,7 @@ void expr_format(double v, char *buf, int len) {
 
 const char *expr_key_text(key_code_t k, bool shift) {
     switch (k) {
-        case KEY_0: return shift ? ")" : "0";
+        case KEY_0: return "0";
         case KEY_1: return "1";
         case KEY_2: return "2";
         case KEY_3: return "3";
@@ -208,7 +213,12 @@ const char *expr_key_text(key_code_t k, bool shift) {
         case KEY_6: return "6";
         case KEY_7: return "7";
         case KEY_8: return "8";
-        case KEY_9: return shift ? "(" : "9";
+        case KEY_9: return "9";
+        case KEY_LPAREN: return "(";
+        case KEY_RPAREN: return ")";
+        case KEY_PI:     return "pi";
+        case KEY_SQUARE: return "^2";
+        case KEY_ANS:    return "ans";
         case KEY_DOT:   return ".";
         case KEY_EE:    return "E";
         case KEY_PLUS:  return "+";

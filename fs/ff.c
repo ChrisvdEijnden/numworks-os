@@ -24,7 +24,7 @@ FRESULT f_read    (FIL *fp, void *buf, UINT btr, UINT *br)
     { (void)fp;(void)buf;(void)btr; if(br)*br=0; return FR_NOT_ENABLED; }
 FRESULT f_write   (FIL *fp, const void *buf, UINT btw, UINT *bw)
     { (void)fp;(void)buf;(void)btw; if(bw)*bw=0; return FR_NOT_ENABLED; }
-FRESULT f_lseek   (FIL *fp, DWORD ofs)
+FRESULT f_lseek   (FIL *fp, FSIZE_t ofs)
     { (void)fp;(void)ofs; return FR_NOT_ENABLED; }
 FRESULT f_opendir (DIR *dp, const char *path)
     { (void)dp;(void)path; return FR_NOT_ENABLED; }
@@ -42,9 +42,3 @@ FRESULT f_rename  (const char *o, const char *n)
     { (void)o;(void)n; return FR_NOT_ENABLED; }
 FRESULT f_getfree (const char *path, DWORD *nclst, FATFS **fatfs)
     { (void)path;(void)nclst;(void)fatfs; return FR_NOT_ENABLED; }
-
-/* Stub disk I/O for drive 1 (USB MSC) — wired up in usb_host.c */
-DRESULT usb_msc_disk_read (BYTE *buf, LBA_t sect, UINT cnt)
-    { (void)buf;(void)sect;(void)cnt; return RES_NOTRDY; }
-DRESULT usb_msc_disk_write(const BYTE *buf, LBA_t sect, UINT cnt)
-    { (void)buf;(void)sect;(void)cnt; return RES_NOTRDY; }

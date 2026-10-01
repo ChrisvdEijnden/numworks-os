@@ -81,7 +81,7 @@ static void execute(void) {
     if (s_ilen == 0) return;
     py_print(">>> "); py_print(s_input); py_print("\n");
     char out[256];
-    int r = mp_exec_capture(s_input, out, sizeof(out));
+    int r = mp_exec_repl_capture(s_input, out, sizeof(out));
     if (r >= 0 && out[0]) { py_print(out); }
     else if (r < 0) { py_print("Uitvoeringsfout\n"); }
     s_input[0] = 0; s_ilen = 0;
@@ -103,7 +103,7 @@ void python_app_redraw(void) {
 void python_app_init(void) {
     s_nout = 0; s_ilen = 0;
     memset(s_output, 0, sizeof(s_output));
-    py_print("MicroPython REPL\nType 'help()' for info\n");
+    py_print("MicroPython REPL\nBACK onderbreekt een lopend script\n");
 }
 
 void python_app_handle_event(const kernel_event_t *ev) {

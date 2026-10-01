@@ -102,6 +102,12 @@ void task_shell(void) {
             default: break;
         }
     }
+    /* Apps that do work between key presses */
+    switch (g_kernel.app_state) {
+        case APP_TETRIS: tetris_tick(); break;
+        case APP_SHELL:  shell_tick();  break;
+        default: break;
+    }
     if (s_redraw_pending) {
         s_redraw_pending = false;
         kernel_set_app(g_kernel.app_state);

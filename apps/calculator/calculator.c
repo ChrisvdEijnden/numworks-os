@@ -56,6 +56,7 @@ static void evaluate(void) {
         return;
     }
     expr_format(v, s_result, sizeof(s_result));
+    expr_set_ans(v);
     s_error = false;
 }
 
@@ -73,7 +74,7 @@ void calculator_redraw(void) {
         "1","2","3","-",
         "0",".","^","+",
         "sin","cos","tan","sqrt",
-        "ln","log","SHIFT 9: (","SHIFT 0: )",
+        "ln","log","(",")",
     };
     int nhints = (int)(sizeof(hints) / sizeof(hints[0]));
     int hx = 4, hy = HEADER_H + DISP_H + 8;
@@ -87,7 +88,7 @@ void calculator_redraw(void) {
         display_rect(x, y, bw, bh, RGB(80,80,120));
         display_str(x+2, y+6, hints[i], RGB(220,220,255), RGB(40,40,60));
     }
-    display_str(4, hy + 6*(bh+gap) + 2, "OK: =   SHIFT: inverse   DEL: wissen",
+    display_str(4, hy + 6*(bh+gap) + 2, "OK: =  SHIFT: inverse  Ans: vorige",
                 YELLOW, C_BG);
 }
 

@@ -138,7 +138,7 @@ void display_str_len(int16_t x, int16_t y, const char *s, int len,
 void display_splash(void) {
     display_fill(BLACK);
     display_fill_rect(0, 0, LCD_WIDTH, 30, BLUE);
-    display_str(10, 8, "NumWorks OS  v0.1", WHITE, BLUE);
+    display_str(10, 8, "NumWorks OS  v" NWOS_VERSION, WHITE, BLUE);
     display_str(10, 50, "Booting...", GREEN, BLACK);
     display_str(10, 70, "216 MHz ARM Cortex-M7", GREY, BLACK);
     display_flush();

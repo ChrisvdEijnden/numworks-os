@@ -1,199 +1,183 @@
-# NumWorks OS — Architecture Document
+# NumWorks OS — Architecture
 
-## Hardware Target
+## Hardware target
 
 | Item | Detail |
 |------|--------|
-| Calculator | NumWorks N0110 |
-| MCU | STM32F730R8T6 (ARM Cortex-M7 @ 216 MHz) |
-| Flash | 512 KB internal |
-| RAM | 256 KB SRAM + 64 KB DTCM |
-| Display | 320×240 ILI9341 (16-bit parallel FSMC) |
-| Input | 9×6 GPIO keypad matrix |
-| USB | OTG_FS (PA11/PA12), CDC-ACM virtual serial |
+| MCU | STM32F730V8T6 — Cortex-M7 @ 216 MHz, single-precision FPU |
+| Flash | 64 KB internal (bootloader) + 8 MB external QSPI (AT25SF641) |
+| RAM | 256 KB in total: 64 KB DTCM @ 0x2000_0000, 176 KB SRAM1, 16 KB SRAM2 |
+| Display | 320×240, 16-bit parallel bus through FMC bank 1 (0x6000_0000) |
+| Input | 9×6 key matrix, NumWorks' 46-key layout |
+| USB | OTG_FS (PA11/PA12) |
+| Power | Li-ion battery, RT9526A linear charger |
 
----
+**The NumWorks N0120 is a different machine.** Its stock firmware uses RAM
+at 0x2400_0000 (STM32H7 AXI-SRAM), which the F730 doesn't have. Running
+on an N0120 means porting the register definitions, clocks, flash, GPIO
+and memory map to the STM32H7 using the N0120 schematic.
 
-## Memory Map
+Not yet verified against a schematic: the keyboard row/column pins, the
+LCD (FMC pins, reset, backlight, orientation), the LED and the charger
+status pins.
 
-```
-Flash (512 KB @ 0x0800_0000)
-├── 0x0800_0000 – 0x0800_FFFF  [ 64 KB]  Bootloader + vector table
-├── 0x0801_0000 – 0x0806_FFFF  [384 KB]  Kernel + all code + read-only data
-└── 0x0807_0000 – 0x0807_FFFF  [ 64 KB]  Flash Filesystem (flashfs)
-
-RAM (256 KB @ 0x2000_0000)
-├── 0x2000_0000 – 0x2003_3FFF  [208 KB]  Framebuffer (153 KB) + kernel BSS
-├── 0x2003_4000 – 0x2003_DFFF  [ 40 KB]  MicroPython heap (48 KB carved here)
-├── 0x2003_E000 – 0x2003_FFFF  [  8 KB]  Kernel allocator pool
-└── DTCM 64 KB @ 0x2004_0000           Main stack (grows down from 0x2004_FFFF)
-```
-
-### Module Flash Budget
-
-| Module | Target (KB) | Notes |
-|--------|-------------|-------|
-| Bootloader + startup | 4 | PLL init, vectors |
-| Kernel + scheduler | 8 | Event loop, 4 tasks |
-| Memory allocator | 1 | Bitmap pool |
-| HAL (display + kbd + uart) | 8 | Drivers |
-| Font (6×8 bitmap) | 1 | 95 chars × 8 bytes |
-| Flash filesystem | 6 | Flat, no malloc |
-| Shell + commands | 10 | 11 commands |
-| File manager UI | 5 | Navigator |
-| USB CDC | 8 | Protocol handler |
-| MicroPython core | ~90 | Stripped build |
-| **Total** | **~141 KB** | Leaves ~243 KB spare |
-
-### RAM Budget
-
-| Area | Size |
-|------|------|
-| Framebuffer (320×240×2) | 153,600 B |
-| MicroPython heap | 48,000 B |
-| Kernel pool | 8,192 B |
-| Stack (DTCM) | 65,536 B |
-| BSS (globals, buffers) | ~5,000 B |
-| **Total** | ~280 KB (fits in 256+64=320 KB) |
-
----
-
-## System Architecture
+## Memory map
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                        APPLICATIONS                          │
-│          Shell/Terminal    │    File Manager UI              │
-│          MicroPython REPL  │    USB File Transfer            │
-├──────────────────────────────────────────────────────────────┤
-│                       KERNEL                                 │
-│  Cooperative Event Loop  │  Task Scheduler  │  Event Queue  │
-│  Memory Allocator        │  App State FSM                   │
-├──────────────────────────────────────────────────────────────┤
-│                    FILESYSTEM LAYER                          │
-│  flashfs (internal flat FS)  │  FatFs shim (FAT32 overlay)  │
-├──────────────────────────────────────────────────────────────┤
-│               HARDWARE ABSTRACTION LAYER (HAL)               │
-│  Display   │  Keyboard  │  UART   │  Timer  │  USB CDC      │
-├──────────────────────────────────────────────────────────────┤
-│                    BOOTLOADER                                │
-│  PLL @ 216 MHz  │  .data copy  │  .bss zero  │  FPU enable  │
-├──────────────────────────────────────────────────────────────┤
-│              STM32F730 HARDWARE                              │
-└──────────────────────────────────────────────────────────────┘
+QSPI flash (XIP)   0x9000_0000  vector table, code, read-only data
+                                (~90 KB; ~195 KB with MicroPython)
+
+DTCM  0x2000_0000  16 KB  stack (grows down from 0x2000_4000; an
+                          overflow faults below 0x2000_0000)
+      0x2000_4000  48 KB  MicroPython heap
+SRAM  0x2001_0000 150 KB  framebuffer (320×240×2)
+      then                .data, .bss (~32 KB)
+      then  ... 0x2004_0000  newlib heap (~11 KB)
+
+Internal flash 0x0807_0000  file system sector (only on parts with
+                            512 KB of flash; on the 64 KB F730x8 the
+                            file system detects this and is disabled)
 ```
 
----
+`linker/numworks_n0120.ld` is the linker script; it asserts the stack
+and heap minimums at link time.
 
-## Kernel Design: Cooperative Event Loop
+## Boot
 
-The kernel uses a **cooperative scheduler** — no preemption, no context switching overhead. Each task runs to completion and calls `scheduler_yield()` to hand control back.
+`Reset_Handler` masks interrupts, sets the stack pointer, points VTOR at
+our vector table, disables interrupts a bootloader left enabled, copies
+`.data`, clears `.bss`, enables the FPU and unmasks interrupts. Then
+`boot_main()`:
+
+1. clocks: switch to HSI, set up the PLL (8 MHz HSE, or HSI if the
+   crystal doesn't start), enable over-drive, switch to 216 MHz;
+2. MPU: the LCD bus at 0x6000_0000 becomes Device memory;
+3. I-cache on (code runs from QSPI); D-cache stays off;
+4. SysTick at 1 kHz.
+
+`main()` then starts the UART, LCD, keyboard, timer, kernel, file
+system, USB (device side) and MicroPython, shows the splash and opens
+the home screen (or the shell, if HOME is held).
+
+## Kernel
+
+A cooperative scheduler with four tasks:
 
 ```
-kernel_main()
-    │
-    ├─ mem_init()
-    ├─ hal_init() → display, keyboard, UART
-    ├─ usb_cdc_init()
-    ├─ flashfs_init()
-    ├─ display_splash()
-    │
-    └─ while(1):
-         scheduler_run_next()
-              │
-              ├─ task_idle()    [PRIO 0] — idle counter
-              ├─ task_input()   [PRIO 2] — keyboard scan → event queue
-              ├─ task_display() [PRIO 2] — flush framebuffer to LCD
-              └─ task_shell()   [PRIO 2] — process events, USB, commands
+input    scan the keyboard (every 5 ms), queue events
+display  push the framebuffer to the LCD if anything was drawn
+app      hand events to the current app, run its tick(), USB protocol
+idle     WFI until the next interrupt
 ```
 
-**Why cooperative?**
-- Zero RAM for saved register banks (no preemptive context switch)
-- No race conditions between tasks (no shared-state bugs)
-- Deterministic latency for keypad response
-- Suitable for a calculator workload (no real-time constraints)
+Each task sleeps one SysTick after running; when none is ready the idle
+task puts the CPU to sleep. Interrupts are masked around the check, so
+a wake-up can't be lost.
 
----
+Apps implement `init()`, `redraw()` and `handle_event()`. Tetris (gravity)
+and the shell (UART input) also have a `tick()`. The kernel calls it
+every loop while the app is shown.
 
-## Flash Filesystem (flashfs)
+## Keyboard
 
-**Layout in 64 KB sector 7:**
+The matrix follows NumWorks' own key order (Epsilon's `ion::Keyboard::Key`,
+index = row × 6 + column). Rows are open-drain outputs and columns are
+inputs with pull-ups. A key must read the same on two scans 5 ms apart.
+Arrows and backspace repeat after 500 ms, every 100 ms. Pins already
+owned by another peripheral (alternate-function mode, e.g. the QSPI
+clock on PB2) are left alone.
+
+`key_to_char()` maps keys to characters: ALPHA gives the letters printed
+on the keys, and SHIFT gives `[ ] { } = _ < > #`. The math apps use
+`expr_key_text()`, which types whole tokens (`sin(`, `^2`, `pi`, `ans`).
+
+## Flash file system (flashfs)
+
 ```
-[0x000 – 0x0FF]  Superblock (256 B)
-[0x100 – 0xFFF]  Directory: 32 × 40-byte entries = 1,280 B
-[0x1000 – end]   File data pool (~60 KB)
+[0x000 – 0x0FF]   superblock (written once, when formatting)
+[0x100 – 0xFFF]   record log: 96 × 40-byte records, append-only
+[0x1000 – end]    file data, append-only (~60 KB)
 ```
 
-**Key design choices:**
-- Zero malloc — directory lives in a static array shadowed in RAM
-- Files are write-once until the sector is erased and rewritten
-- Max 32 files, max 8 KB per file
-- Flat structure — directory prefix `dir/` simulates folders
+Flash can only be programmed from the erased state, so nothing is
+rewritten in place:
 
----
+- Writing a file appends its data, then a record pointing at it.
+- Deleting or renaming appends a record.
+- The newest record for a name wins.
+- A record only counts once its last word is programmed, so a power cut
+  mid-write keeps the previous version.
 
-## Shell Commands
+When the log or the data area is full, the live files are compacted in a
+RAM scratch buffer (the framebuffer; the current app is redrawn
+afterwards), the sector is erased and the image is programmed back.
+A power cut *during compaction* loses the file system; avoiding that
+needs a second sector.
+
+Limits: 32 files, 8 KB per file, names up to 23 characters.
+
+## Math apps
+
+`apps/common/expr.c` is a small recursive-descent evaluator:
+- operators `+ - * / ^`, implicit multiplication (`2x`);
+- `x`, `pi`, `e`, `ans`;
+- sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, sqrt, cbrt, ln, log, exp, abs.
+
+The Calculator, Functions (graph and table) and Equations apps all use
+it. The single-equation solver runs Newton's method from several
+starting points.
+
+## MicroPython
+
+Built from MicroPython's embed port (`make mp`; see `docs/BUILD.md`).
+Configuration is in `micropython-port/mpconfigport.h`:
+- core features, single-precision floats, `math` and `io`;
+- `open()` is read-only and returns an `io.StringIO` of the file;
+- importing files and `input()` are not supported yet.
+
+The `display` module offers:
+- `fill(c)`
+- `str(x, y, text[, fg[, bg]])`
+- `pixel(x, y, c)`
+- `fill_rect(x, y, w, h, c)`
+- `rgb(r, g, b)`
+- `flush()`
+- colour constants.
+
+A VM hook polls the keyboard so BACK interrupts a running script. Scripts
+started with `run` print to the shell. The Python app runs one line at a
+time and shows expression values, like a `>>>` prompt.
+
+## Shell commands
 
 | Command | Description |
 |---------|-------------|
-| `help` | List all commands |
+| `help` | List commands |
 | `ls` | List files with sizes |
-| `cat <file>` | Print file contents |
-| `touch <file>` | Create empty file |
-| `rm <file>` | Delete file |
-| `mkdir <name>` | Create directory entry (prefix alias) |
-| `echo <text>` | Print text to screen |
-| `run <file.py>` | Execute Python script via MicroPython |
-| `mem` | Show RAM + flash usage |
-| `fm` | Open graphical file manager |
-| `reboot` | Software reset via SCB AIRCR |
+| `cat <file>` | Print a file |
+| `touch <file>` | Create an empty file |
+| `rm <file>` | Delete a file |
+| `mkdir <name>` | Same as `touch` (the file system is flat) |
+| `echo <text>` | Print text |
+| `run <file.py>` | Run a Python script |
+| `mem` | RAM pool and flash usage |
+| `fm` | Open the file manager |
+| `reboot` | Reset |
 
----
+The shell also reads commands from the debug UART (USART1, 115200 8N1).
 
-## USB File Transfer Protocol
+## PC file transfer protocol
 
-Simple line-based text protocol over CDC-ACM (virtual serial port):
+One command per line (`\n` or `\r\n`); replies end in `\r\n`:
 
 ```
-PC → Calc:   LIST\r\n
-Calc → PC:   hello.py 1234\r\nnotes.txt 456\r\nOK\r\n
-
-PC → Calc:   RECV hello.py\r\n
-Calc → PC:   DATA 1234\r\n<1234 bytes of data>
-
-PC → Calc:   SEND hello.py 1234\r\n<1234 bytes of data>
-Calc → PC:   OK\r\n
-
-PC → Calc:   DEL hello.py\r\n
-Calc → PC:   OK\r\n
+LIST               -> "<name> <size>" per file, then "OK"
+RECV <name>        -> "DATA <size>", <size> raw bytes, then "OK"
+SEND <name> <size> -> "READY"; the PC sends <size> raw bytes -> "OK"
+DEL <name>         -> "OK"
+failures           -> "ERR <reason>"
 ```
 
-PC-side tool: `tools/upload.py` (Python 3 + pyserial)
-
----
-
-## MicroPython Integration
-
-MicroPython is linked as a static library built from the `ports/numworks/` port.
-
-**Custom modules available in Python:**
-
-```python
-import display
-display.fill(display.BLACK)
-display.str(10, 50, "Hello NumWorks!", display.WHITE)
-display.flush()
-```
-
-**Filesystem access from Python:**
-```python
-# Read a file
-data = open("notes.txt").read()
-
-# Files written via shell or USB are immediately available
-```
-
-**Build configuration** (`micropython-port/mpconfigport.h`):
-- Disabled: `float` (use fixed-point), `uio`, `ussl`, `ujson`
-- Enabled: `uos`, `usys`, `umath`, `ustruct`
-- Heap: 48 KB
+`usb/usb_cdc.c` implements it on two ring buffers; a USB device stack
+fills and drains them with `usb_cdc_rx_push()` / `usb_cdc_tx_pop()`.
+That stack doesn't exist yet. The PC side is `tools/upload.py`.

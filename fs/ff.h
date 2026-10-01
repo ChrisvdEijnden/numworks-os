@@ -13,20 +13,7 @@ typedef uint16_t WORD;
 typedef uint32_t DWORD;
 typedef uint8_t  BYTE;
 typedef unsigned int UINT;
-typedef uint8_t  DSTATUS;
-typedef enum { RES_OK=0, RES_ERROR, RES_WRPRT, RES_NOTRDY, RES_PARERR } DRESULT;
-
-/* disk_status flags */
-#define STA_NOINIT  0x01
-#define STA_NODISK  0x02
-#define STA_PROTECT 0x04
-
-/* disk_ioctl commands */
-#define CTRL_SYNC         0
-#define GET_SECTOR_COUNT  1
-#define GET_SECTOR_SIZE   2
-#define GET_BLOCK_SIZE    3
-#define CTRL_TRIM         4
+typedef DWORD FSIZE_t;
 
 /* FatFs result codes */
 typedef enum {

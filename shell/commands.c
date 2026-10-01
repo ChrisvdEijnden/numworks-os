@@ -15,6 +15,9 @@
 #include "../include/string.h"
 #include "../include/stdlib.h"
 
+/* cat and run never run at the same time: one file buffer for both */
+static char s_filebuf[FFS_MAX_FILE_SIZE+1];
+
 /* ── Argument parsing (no malloc) ────────────────────────────── */
 #define MAX_ARGS 8
 static char *s_argv[MAX_ARGS];
@@ -69,11 +72,10 @@ static void cmd_cat(void) {
     if (flashfs_open_read(s_argv[1], &off, &sz) < 0) {
         shell_print("cat: %s: not found\n", s_argv[1]); return;
     }
-    static char fbuf[FFS_MAX_FILE_SIZE+1];
     if (sz > FFS_MAX_FILE_SIZE) sz = FFS_MAX_FILE_SIZE;
-    flashfs_read(off, fbuf, sz);
-    fbuf[sz] = 0;
-    shell_puts(fbuf);
+    flashfs_read(off, s_filebuf, sz);
+    s_filebuf[sz] = 0;
+    shell_puts(s_filebuf);
     shell_putc('\n');
 }
 
@@ -116,12 +118,11 @@ static void cmd_run_script(void) {
     if (flashfs_open_read(s_argv[1], &off, &sz) < 0) {
         shell_print("run: %s: not found\n", s_argv[1]); return;
     }
-    static char script[FFS_MAX_FILE_SIZE+1];
     if (sz > FFS_MAX_FILE_SIZE) { shell_puts("run: file too large\n"); return; }
-    flashfs_read(off, script, sz);
-    script[sz] = 0;
+    flashfs_read(off, s_filebuf, sz);
+    s_filebuf[sz] = 0;
     shell_print("Running: %s\n", s_argv[1]);
-    mp_exec_str(script);
+    mp_exec_str(s_filebuf);
 }
 
 static void cmd_reboot(void) {

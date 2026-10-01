@@ -227,7 +227,7 @@ void equations_redraw(void) {
              display_str(8, HEADER_H+57, line, WHITE, s_editing?C_SEL:C_FLD);}
             break;
     }
-    display_str(4, LCD_HEIGHT-14, s_editing ? "OK:Klaar  SHIFT 9/0: ( )  ALPHA:Annuleer"
+    display_str(4, LCD_HEIGHT-14, s_editing ? "OK:Klaar  XNT: x  ALPHA:Annuleer"
                                             : "OK:Los op  ALPHA:Bewerk  L/R:Modus",
                 YELLOW, C_BG);
     show_results();

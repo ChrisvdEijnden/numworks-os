@@ -29,7 +29,7 @@ typedef enum {
 
 typedef struct {
     uint8_t  key;
-    uint8_t  action;   /* 0=press, 1=release, 2=repeat */
+    uint8_t  action;   /* 0=press (auto-repeat also arrives as press), 1=release */
     uint16_t _pad;
 } kernel_event_t;
 

@@ -1,9 +1,14 @@
 /* ================================================================
- * NumWorks OS — Central Configuration (N0120 Custom Build)
- * Target: STM32F730V8T6 · 216 MHz Cortex-M7
- *         Flash 8 MB (external QSPI) · RAM 128 KB + 64 KB DTCM
+ * NumWorks OS — Central Configuration
+ * Target: STM32F730V8T6 · 216 MHz Cortex-M7 (single-precision FPU)
+ *         Flash 64 KB internal + 8 MB external QSPI
+ *         RAM 256 KB in total, including the 64 KB DTCM
+ * NOTE: the NumWorks N0120 uses an STM32H7, not this chip — see
+ *       docs/ARCHITECTURE.md before running this on an N0120.
  * ================================================================ */
 #pragma once
+
+#define NWOS_VERSION        "0.2"
 
 /* ── Clock ──────────────────────────────────────────────────── */
 #define HSE_HZ            8000000UL   /* external crystal (HSI 16 MHz used if it fails) */

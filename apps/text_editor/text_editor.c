@@ -39,6 +39,10 @@ static bool  s_modified = false;
 static bool  s_shift = false;
 static bool  s_alpha = false;
 static const char *s_status = "";   /* one-shot message in the footer */
+/* Asking for a file name before the first save of a new document */
+static bool  s_naming = false;
+static char  s_name[FFS_NAME_LEN];
+static int   s_name_len = 0;
 
 /* Count lines */
 static int count_lines(void) {
@@ -114,7 +118,10 @@ static void draw_bars(void) {
 
     display_fill_rect(0, LCD_HEIGHT-FOOTER_H, LCD_WIDTH, FOOTER_H, RGB(25,25,40));
     char foot[64];
-    if (s_status[0])
+    if (s_naming && !s_status[0])
+        snprintf(foot, sizeof(foot), "Naam: %s_ (%s)",
+                 s_name, s_alpha ? (s_shift ? "ABC" : "abc") : "123");
+    else if (s_status[0])
         snprintf(foot, sizeof(foot), "%s", s_status);
     else
         snprintf(foot, sizeof(foot), "%s%s  SHIFT+OK:Opslaan  HOME:Terug",
@@ -130,8 +137,8 @@ void text_editor_redraw(void) {
 }
 
 void text_editor_init(void) {
-    s_tlen=0; s_cpos=0; s_scroll=0; s_modified=false;
-    s_shift=false; s_alpha=false; s_filename[0]=0; s_text[0]=0;
+    text_editor_new();
+    s_shift=false; s_alpha=false;
 }
 
 bool text_editor_open(const char *name) {
@@ -150,8 +157,11 @@ bool text_editor_open(const char *name) {
 
 static void save_file(void) {
     if (!s_filename[0]) {
-        /* Prompt — for now use default name */
-        strncpy(s_filename, "noname.txt", FFS_NAME_LEN-1);
+        /* New document: ask for a name first (letters by default) */
+        s_naming = true;
+        s_name_len = 0; s_name[0] = 0;
+        s_alpha = true; s_shift = false;
+        return;
     }
     if (flashfs_write(s_filename, s_text, (uint32_t)s_tlen) == s_tlen) {
         s_modified = false;
@@ -176,11 +186,58 @@ static void delete_char(void) {
     s_modified = true;
 }
 
+static bool name_char_ok(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+}
+
+/* Keys while asking for a file name */
+static void naming_key(key_code_t k) {
+    s_status = "";
+    if (k == KEY_HOME || k == KEY_BACK) {
+        s_naming = false; s_alpha = false;
+        s_status = "Niet opgeslagen";
+    } else if (k == KEY_SHIFT) {
+        s_shift = !s_shift;
+    } else if (k == KEY_ALPHA) {
+        s_alpha = !s_alpha;
+    } else if (k == KEY_BACKSPACE) {
+        if (s_name_len > 0) s_name[--s_name_len] = 0;
+    } else if (key_is_exe(k)) {
+        if (s_name_len == 0) {
+            s_status = "Geef eerst een naam";
+        } else if (flashfs_exists(s_name)) {
+            s_status = "Naam bestaat al, kies een andere";   /* never overwrite */
+        } else {
+            strncpy(s_filename, s_name, FFS_NAME_LEN-1);
+            s_filename[FFS_NAME_LEN-1] = 0;
+            s_naming = false; s_alpha = false;
+            save_file();
+            if (s_modified) s_filename[0] = 0;   /* failed: stay unnamed */
+        }
+    } else {
+        char c = key_to_char(k, s_shift, s_alpha);
+        if (c && name_char_ok(c) && s_name_len < FFS_NAME_LEN-1) {
+            s_name[s_name_len++] = c;
+            s_name[s_name_len] = 0;
+            s_shift = false;
+        }
+    }
+    draw_bars();
+}
+
+void text_editor_new(void) {
+    s_tlen=0; s_cpos=0; s_scroll=0; s_modified=false;
+    s_filename[0]=0; s_text[0]=0;
+    s_naming = false; s_status = "";
+}
+
 void text_editor_handle_event(const kernel_event_t *ev) {
     if (ev->action != 0) return;
     key_code_t k = (key_code_t)ev->key;
     int cl = cursor_line();
 
+    if (s_naming) { naming_key(k); return; }
     if (k==KEY_HOME||k==KEY_BACK) { kernel_set_app(APP_HOME); return; }
     s_status = "";
     if (k==KEY_SHIFT) { s_shift=!s_shift; text_editor_redraw(); return; }

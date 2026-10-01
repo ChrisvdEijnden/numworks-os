@@ -21,6 +21,7 @@
  * ================================================================ */
 #include "usb_host.h"
 #include "../fs/ff.h"
+#include "../fs/diskio.h"
 #include "../include/stm32f730.h"
 #include "../include/config.h"
 #include "../include/string.h"
@@ -70,9 +71,17 @@ static host_state_t s_state   = HOST_STATE_IDLE;
 static bool         s_mounted = false;
 static FATFS        s_fatfs;
 
-/* FatFs disk I/O layer — implemented in fs/diskio.c (USB MSC path) */
-extern DRESULT  usb_msc_disk_read(BYTE *buf, LBA_t sector, UINT count);
-extern DRESULT  usb_msc_disk_write(const BYTE *buf, LBA_t sector, UINT count);
+/* ── Mass-storage hooks for FatFs drive 1 (fs/diskio.c) ──────────
+ * Placeholders until a host stack with a mass-storage class driver
+ * exists: the drive always reports "not ready". They live here, not in
+ * fs/ff.c, so replacing ff.c with the real FatFs keeps them. */
+DSTATUS usb_msc_disk_status(void) { return STA_NOINIT; }
+DRESULT usb_msc_disk_read(BYTE *buf, LBA_t sector, UINT count)
+    { (void)buf; (void)sector; (void)count; return RES_NOTRDY; }
+DRESULT usb_msc_disk_write(const BYTE *buf, LBA_t sector, UINT count)
+    { (void)buf; (void)sector; (void)count; return RES_NOTRDY; }
+DRESULT usb_msc_disk_ioctl(BYTE cmd, void *buf)
+    { (void)cmd; (void)buf; return RES_NOTRDY; }
 
 /* ── OTG_FS clock & GPIO init ────────────────────────────────── */
 static void otg_gpio_init(void) {

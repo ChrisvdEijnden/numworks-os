@@ -190,14 +190,6 @@ void shell_handle_event(const kernel_event_t *ev) {
         refresh(); return;
     }
 
-    /* Accept UART input too */
-    int uart_c = hal_uart_getc();
-    if (uart_c > 0) {
-        if (uart_c == '\r' || uart_c == '\n') { execute(); refresh(); return; }
-        if (uart_c == 127 && s_inlen > 0) { s_input[--s_inlen] = 0; s_dirty = true; refresh(); return; }
-        if (s_inlen < SHELL_LINE_LEN) { s_input[s_inlen++] = (char)uart_c; s_dirty = true; }
-    }
-
     /* Printable key */
     char c = key_to_char(k, s_shift, s_alpha);
     if (c && s_inlen < SHELL_LINE_LEN) {
@@ -208,11 +200,29 @@ void shell_handle_event(const kernel_event_t *ev) {
     refresh();
 }
 
+/* Called by the kernel every loop while the shell is shown: serial input
+ * (typed in a terminal on the debug UART) works without key presses. */
+void shell_tick(void) {
+    int c;
+    while ((c = hal_uart_getc()) > 0) {
+        if (c == '\r' || c == '\n') {
+            execute();
+        } else if (c == 127 || c == '\b') {
+            if (s_inlen > 0) s_input[--s_inlen] = 0;
+        } else if (c >= ' ' && c < 127 && s_inlen < SHELL_LINE_LEN) {
+            s_input[s_inlen++] = (char)c;
+        }
+        s_dirty = true;
+        if (kernel_get_app() != APP_SHELL) return;   /* a command switched app */
+    }
+    refresh();
+}
+
 void shell_init(void) {
     memset(s_lines, 0, sizeof(s_lines));
     memset(s_input, 0, sizeof(s_input));
     s_nlines = 0; s_inlen = 0;
     shell_redraw();
-    shell_puts("NumWorks OS v0.1  Ready.\n");
+    shell_puts("NumWorks OS v" NWOS_VERSION "  Ready.\n");
     shell_puts("Type 'help' for commands.\n");
 }

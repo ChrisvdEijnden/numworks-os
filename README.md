@@ -1,27 +1,49 @@
-# NumWorks OS — N0120 Custom Firmware
+# NumWorks OS — custom calculator firmware
 
-A fully custom firmware for the **NumWorks N0120** calculator, built on top of the existing NumWorks OS base (from the provided backup archive). Adds a graphical homepage, new apps, USB drive support, and LED control.
+A custom firmware for NumWorks calculators: a graphical home screen,
+a calculator, graphing, equation solving, MicroPython, a shell, a file
+manager, a text editor and Tetris.
+
+> **Status — read first.**
+> - The code targets the **STM32F730** (the NumWorks N0110 family). The
+>   **NumWorks N0120 uses an STM32H7**, so this firmware does **not** run
+>   on an N0120 yet; that needs a port based on the N0120 schematic.
+> - The keyboard and LCD pin mappings have not been checked against a
+>   schematic, and the USB device stack (for PC file transfer) is not
+>   written yet.
+> - Nothing here has been tested on a real calculator. Before flashing
+>   anything, read *Flashing and recovery* in `docs/BUILD.md`.
 
 ## Features
 
-| App | Dutch Name | Description |
-|-----|-----------|-------------|
-| **Rekenmachine** | Calculator | Scientific calculator (native evaluator, no Python needed) |
-| **Functies** | Functions | Graph plotter, table view, zoom/pan |
-| **Vergelijkingen** | Equations | Quadratic, linear systems, single equation |
-| **Python** | Python REPL | Interactive MicroPython REPL |
-| **Bestanden** | File Manager | Browse & manage internal flash files |
-| **Shell** | Shell | Unix-like terminal (ls, cat, rm, run, ...) |
-| **Tetris** | Tetris | Classic Tetris game |
-| **Docs** | Docs | Built-in reference documentation |
-| **Instellingen** | Settings | LED lamp (rood/wit/uit), version info, reboot |
-| **Foto's** | Photo Viewer | View .bmp/.jpg/.png from USB drive |
-| **Editor** | Text Editor | Open (from Bestanden), edit, save .txt/.py files |
+| App | Dutch name | What it does | State |
+|-----|-----------|--------------|-------|
+| **Rekenmachine** | Calculator | Scientific calculator, `Ans`, inverse functions | Works (native evaluator) |
+| **Functies** | Functions | Up to 4 functions: graph (pan/zoom), table; edit/delete | Works |
+| **Vergelijkingen** | Equations | Quadratic, 2×2 linear system, f(x)=0 (Newton) | Works |
+| **Python** | Python REPL | MicroPython: `math`, `display`, read-only `open()` | Needs `make mp` |
+| **Bestanden** | File manager | Open in editor, new file, delete (SHIFT twice) | Works |
+| **Shell** | Shell | `ls cat touch rm echo run mem fm reboot`; also over UART | Works |
+| **Tetris** | Tetris | Classic Tetris | Works |
+| **Docs** | Docs | Built-in reference | Works |
+| **Instellingen** | Settings | LED, version, reboot | LED pin unverified, "white" = red |
+| **Foto's** | Photo viewer | 24-bit BMP from a USB drive | Needs USB host + FatFs (missing) |
+| **Editor** | Text editor | Edit files up to 4 KB, asks a name for new files | Works |
+| PC transfer | `tools/upload.py` | List, upload, download, delete files | Protocol done, USB stack missing |
 
-## Homepage
+## Keys
 
-3×4 icon grid with colour indicators. Navigate with arrow keys, press OK (or EXE) to open.
-In the math apps, SHIFT 9 / SHIFT 0 type `(` / `)` and SHIFT gives the inverse functions.
+Navigate with the arrow keys, **OK** (or **EXE**) opens or confirms,
+**HOME**/**BACK** go back. Arrows and backspace repeat when held.
+
+- In the math apps, **SHIFT** gives the inverse function
+  (sin → asin, ln → e^x, √ → ∛).
+- In text fields (shell, editor, Python), **ALPHA** types the letters
+  printed on the keys; SHIFT+ALPHA types capitals. **SHIFT** alone
+  types `[ ] { } = _ < > #` on `( ) × ÷ + − . 0 ,`.
+- In a running Python script, **BACK** raises `KeyboardInterrupt`.
+
+## Home screen
 
 ```
 ┌──────────────┬──────────────┬──────────────┐
@@ -35,104 +57,78 @@ In the math apps, SHIFT 9 / SHIFT 0 type `(` / `)` and SHIFT gives the inverse f
 └──────────────┴──────────────┴──────────────┘
 ```
 
-## Source Layout
+## Source layout
 
 ```
-epsilon-nwos/
+numworks-os/
 ├── Makefile
-├── README.md
-├── main.c                      Boot entry point
+├── main.c                      Boot sequence
 ├── linker/
-│   ├── numworks_n0120.ld       Linker script (Phi @ 0x08040000)
-│   └── numworks.ld             Original linker script
+│   ├── numworks_n0120.ld       Linker script (QSPI XIP @ 0x90000000)
+│   └── numworks.ld             Legacy, unused (wrong memory map)
 ├── include/
-│   ├── config.h                Central config (updated for N0120)
+│   ├── config.h                Central configuration
 │   └── stm32f730.h             Register definitions
 ├── bootloader/
 │   ├── startup_stm32f730.s     Vector table + Reset_Handler
-│   └── boot.c                  PLL init, SysTick
-├── kernel/
-│   ├── kernel.c/h              Event loop + app dispatcher (extended)
-│   ├── scheduler.c/h           Cooperative scheduler
-│   └── memory.c/h              Memory pool allocator
-├── hal/
-│   ├── display.c/h             ILI9341 FSMC framebuffer driver
-│   ├── keyboard.c/h            9×6 GPIO matrix scanner
-│   ├── uart.c/h                USART1 debug
-│   ├── timer.c/h               TIM6 microsecond counter
-│   └── font.c/h                6×8 bitmap font
+│   └── boot.c                  Clocks (216 MHz), MPU, I-cache, SysTick
+├── kernel/                     Event loop, scheduler, pool allocator
+├── hal/                        LCD, keyboard, UART, timer
 ├── fs/
-│   ├── flashfs.c/h             Internal flash filesystem (sector 7)
-│   ├── ff.c / ff.h             Chan FatFs (for USB drive)
-│   └── diskio.c                FatFs ↔ USB MSC glue
-├── shell/
-│   ├── shell.c/h               Terminal UI (reused from backup)
-│   └── commands.c/h            Shell commands
-├── ui/
-│   ├── filemanager.c/h         Graphical file browser (reused)
-│   └── font.c                  Font bitmap data
+│   ├── flashfs.c/h             Flash file system (append-only log)
+│   ├── ff.c / ff.h             FatFs stub (replace with real FatFs)
+│   └── diskio.c/h              FatFs drive glue (drive 1 = USB)
+├── shell/                      Terminal UI + commands
+├── ui/filemanager.c            File manager
 ├── usb/
-│   ├── usb_cdc.c/h             USB CDC-ACM virtual serial (reused)
-│   └── usb_host.c/h            USB OTG Host for mass storage (NEW)
+│   ├── usb_cdc.c/h             PC transfer protocol (USB stack missing)
+│   └── usb_host.c/h            USB host skeleton (not started at boot)
 ├── micropython-port/
-│   ├── mp_port.c/h             MicroPython glue + output capture
-│   └── mpconfigport.h          Build config
-├── apps/                       ← All NEW apps
-│   ├── home/                   Icon grid homepage
-│   ├── calculator/             Scientific calculator
-│   ├── functions/              Graph plotter
-│   ├── equations/              Equation solver
-│   ├── python_app/             Python REPL
-│   ├── tetris/                 Tetris game
-│   ├── docs_app/               Built-in docs
-│   ├── settings/               Settings + LED control
-│   ├── photo_viewer/           Image viewer (USB)
-│   └── text_editor/            Text/Python editor
+│   ├── mp_port.c/h             MicroPython glue
+│   ├── mpconfigport.h          MicroPython configuration
+│   ├── micropython_embed.mk    Used by `make mp`
+│   └── modules/nwos/           `display` module, builtin open()
+├── apps/
+│   ├── common/expr.c/h         Expression evaluator (math apps)
+│   └── <app>/                  One directory per app
 ├── tools/
 │   ├── upload.py               PC file transfer
-│   └── transfer.py             Transfer utility
+│   └── transfer.py             Same, alternative command line
 └── docs/
-    ├── BUILD.md                Build & flash instructions
-    └── ARCHITECTURE.md         System architecture reference
+    ├── BUILD.md                Building, flashing, recovery
+    └── ARCHITECTURE.md         How the system works
 ```
 
 ## Building
 
-See `docs/BUILD.md` for full instructions. Quick start:
+See `docs/BUILD.md` for details. In short:
 
 ```bash
-# 1. Get toolchain
-sudo apt install gcc-arm-none-eabi dfu-util
+sudo apt install gcc-arm-none-eabi libnewlib-arm-none-eabi
+make                    # firmware without Python
 
-# 2. Get MicroPython
 git clone https://github.com/micropython/micropython
-make -C micropython/mpy-cross
-make mp
-
-# 3. Build
-make -j4
-
-# 4. Flash (Phi bootloader)
-make phi
+make mp && make         # firmware with Python
 ```
 
-## Bootloader Compatibility
+The image is linked to run from the external QSPI flash at
+`0x90000000`. `make phi`, `make delta` and `make openocd` refuse to
+flash it to an address it isn't linked for, and `make flash` asks for
+confirmation because it overwrites the stock firmware.
 
-This firmware is designed for the **Phi bootloader** on N0120 (firmware at 0x08040000).
+## Code design
 
-To use **Delta** or **OpenOCD (no bootloader)**:
-- Change `FIRMWARE_START` in `linker/numworks_n0120.ld`
-- For Delta: `0x08010000`
-- For full flash: `0x08000000`
-
-## Code Design
-
-- Every app is a self-contained module in `apps/<name>/`
-- Apps implement three functions: `init()`, `redraw()`, `handle_event()`
-- All drawing goes through `display_*()` functions (framebuffer + flush)
-- The kernel `kernel_set_app()` function switches between apps
-- No direct hardware access from app code — HAL functions only
+- Every app is a module in `apps/<name>/` with `init()`, `redraw()` and
+  `handle_event()`; apps that work between key presses also have a
+  `tick()` (Tetris, Shell).
+- All drawing goes into a framebuffer through `display_*()`; the kernel
+  pushes it to the LCD when something changed.
+- `kernel_set_app()` switches apps. Tasks sleep between ticks and the
+  CPU waits in `WFI` when idle.
 
 ## License
 
-MIT. NumWorks hardware schematics from the open-source NumWorks project.
+The code in this repository is MIT licensed. MicroPython (`make mp`)
+and FatFs keep their own licenses. `epsilon-qspi-backup.bin` is a dump
+of NumWorks' own firmware: it is not covered by this repository's
+license.

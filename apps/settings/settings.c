@@ -88,7 +88,7 @@ static void draw_row(int i) {
             display_str(10, y+8, "Taal:  Nederlands", WHITE, bg);
             break;
         case 2:
-            display_str(10, y+8, "Versie: NumWorks OS v1.0 N0120", WHITE, bg);
+            display_str(10, y+8, "Versie: NumWorks OS v" NWOS_VERSION, WHITE, bg);
             break;
         case 3:
             display_str(10, y+8, "Systeem herstarten", RED, bg);

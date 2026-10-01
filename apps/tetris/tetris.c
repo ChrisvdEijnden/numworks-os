@@ -61,9 +61,14 @@ static int rand_piece(void) { s_rng=s_rng*1664525+1013904223; return (s_rng>>16)
 
 static void draw_cell(int bx, int by, uint16_t col) {
     int px = OX + bx*CS, py = OY + by*CS;
+    if (col == C_BG) {
+        /* Erase the whole cell, border included, or moving pieces
+         * leave a trail of outlines */
+        display_fill_rect(px, py, CS, CS, C_BG);
+        return;
+    }
     display_fill_rect(px+1, py+1, CS-2, CS-2, col);
-    if (col != C_BG)
-        display_rect(px, py, CS, CS, RGB(200,200,200));
+    display_rect(px, py, CS, CS, RGB(200,200,200));
 }
 
 static bool piece_fits(int px, int py, int t, int r) {
@@ -100,8 +105,9 @@ static void clear_lines(void) {
     s_score += pts[cleared] * (s_level+1);
     s_lines += cleared;
     s_level  = s_lines / 10;
-    s_drop_ms = (uint32_t)(600 - s_level*40);
-    if (s_drop_ms < 100) s_drop_ms = 100;
+    /* Signed: from level 16 on, 600 - level*40 is negative */
+    int drop = 600 - s_level*40;
+    s_drop_ms = (uint32_t)(drop < 100 ? 100 : drop);
 }
 
 static void new_piece(void) {
@@ -140,6 +146,20 @@ static void draw_sidebar(void) {
     display_str(sx, OY+148, "HOME:Stop", RGB(160,160,160), C_BG);
 }
 
+static void draw_game_over(void) {
+    display_fill_rect(40, 100, 240, 40, RGB(200,0,0));
+    display_str(60, 108, "GAME OVER  OK:Opnieuw", WHITE, RGB(200,0,0));
+}
+
+/* The falling piece can't move down: fix it, clear lines, spawn the next */
+static void lock_piece(void) {
+    stamp_piece(); clear_lines(); new_piece();
+    draw_board();
+    draw_piece(PCOL[s_ptype+1]);
+    draw_sidebar();
+    if (s_game_over) draw_game_over();
+}
+
 void tetris_redraw(void) {
     display_fill(C_BG);
     display_fill_rect(0,0,LCD_WIDTH,18, RGB(30,80,200));
@@ -149,10 +169,9 @@ void tetris_redraw(void) {
     draw_board();
     draw_piece(PCOL[s_ptype+1]);
     draw_sidebar();
-    if (s_game_over) {
-        display_fill_rect(40, 100, 240, 40, RGB(200,0,0));
-        display_str(60, 108, "GAME OVER  HOME:Terug", WHITE, RGB(200,0,0));
-    }
+    if (s_game_over) draw_game_over();
+    /* Don't drop a row for the time spent in other apps */
+    s_last_drop = hal_tick_ms();
 }
 
 void tetris_init(void) {
@@ -162,24 +181,27 @@ void tetris_init(void) {
     new_piece();
 }
 
-void tetris_handle_event(const kernel_event_t *ev) {
-    /* Gravity tick (polled via events or timer) */
+/* Called by the kernel every loop while Tetris is shown: gravity */
+void tetris_tick(void) {
     uint32_t now = hal_tick_ms();
-    if (!s_game_over && now - s_last_drop >= s_drop_ms) {
-        s_last_drop = now;
+    if (s_game_over || now - s_last_drop < s_drop_ms) return;
+    s_last_drop = now;
+    if (piece_fits(s_px, s_py+1, s_ptype, s_prot)) {
         draw_piece(C_BG);
-        if (piece_fits(s_px, s_py+1, s_ptype, s_prot)) {
-            s_py++;
-        } else {
-            stamp_piece(); clear_lines(); new_piece();
-            draw_board();
-        }
+        s_py++;
         draw_piece(PCOL[s_ptype+1]);
-        draw_sidebar();
+    } else {
+        lock_piece();
     }
+}
 
+void tetris_handle_event(const kernel_event_t *ev) {
     if (ev->action != 0) return;
     key_code_t k = (key_code_t)ev->key;
+    uint32_t now = hal_tick_ms();
+    /* Key timing is the only entropy we have: mix it into the RNG so
+     * every game gets a different piece sequence */
+    s_rng ^= hal_micros();
 
     if (k == KEY_HOME || k == KEY_BACK) { kernel_set_app(APP_HOME); return; }
     if (s_game_over) {
@@ -192,16 +214,18 @@ void tetris_handle_event(const kernel_event_t *ev) {
     if (k == KEY_LEFT  && piece_fits(s_px-1,s_py,s_ptype,s_prot)) { s_px--; redraw=true; }
     else if (k == KEY_RIGHT && piece_fits(s_px+1,s_py,s_ptype,s_prot)) { s_px++; redraw=true; }
     else if (k == KEY_DOWN) {
-        if (piece_fits(s_px,s_py+1,s_ptype,s_prot)) { s_py++; s_last_drop=now; }
-        else { stamp_piece(); clear_lines(); new_piece(); draw_board(); }
-        redraw=true;
+        if (piece_fits(s_px,s_py+1,s_ptype,s_prot)) { s_py++; s_last_drop=now; redraw=true; }
+        else { lock_piece(); return; }
     } else if (k == KEY_UP) {
         int nr = (s_prot+1)%4;
         if (piece_fits(s_px,s_py,s_ptype,nr)) { s_prot=nr; redraw=true; }
     } else if (key_is_exe(k)) {
         /* Hard drop */
         while (piece_fits(s_px,s_py+1,s_ptype,s_prot)) s_py++;
-        stamp_piece(); clear_lines(); new_piece(); draw_board(); redraw=true;
+        lock_piece();
+        return;
     }
-    if (redraw) { draw_piece(PCOL[s_ptype+1]); draw_sidebar(); }
+    /* Redraw the piece whether or not it moved: it was erased above */
+    draw_piece(PCOL[s_ptype+1]);
+    if (redraw) draw_sidebar();
 }

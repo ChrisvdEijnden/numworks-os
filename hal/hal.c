@@ -13,7 +13,7 @@ extern volatile uint32_t g_tick_ms;
 void hal_init(void) {
     /* UART for debug output */
     hal_uart_init();
-    hal_uart_puts("\r\nNumWorks OS v0.1 booting...\r\n");
+    hal_uart_puts("\r\nNumWorks OS v" NWOS_VERSION " booting...\r\n");
 }
 
 uint32_t hal_tick_ms(void) {

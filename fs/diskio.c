@@ -1,51 +1,46 @@
 /* ================================================================
- * NumWorks OS — FatFs diskio shim for flashfs
+ * NumWorks OS — FatFs physical-drive layer
  * File: fs/diskio.c
  *
- * Maps FatFs physical layer to our flashfs for internal storage.
- * For external USB-MSC, a second drive (1:) would be wired here.
+ * Drive 0: none. Internal storage is flashfs (fs/flashfs.c), which is
+ *          not a FAT volume, so FatFs must never read or format it.
+ * Drive 1: USB mass storage ("1:"), through the MSC hooks in
+ *          usb/usb_host.c. These report "not ready" until a USB host
+ *          stack with a mass-storage class driver exists.
  * ================================================================ */
 #include "ff.h"
 #include "diskio.h"
-#include "flashfs.h"
 #include "../include/config.h"
-#include "../include/string.h"
 
-/* Drive 0 = internal flash (512-byte logical sectors over flashfs) */
-#define SECTOR_SIZE 512U
-#define DISK_SIZE   (FFS_SIZE)
+#define DRV_USB 1
 
 DSTATUS disk_initialize(BYTE drv) {
-    if (drv != 0) return STA_NOINIT;
-    return 0;
+    if (drv != DRV_USB) return STA_NOINIT | STA_NODISK;
+    return usb_msc_disk_status();
 }
 
 DSTATUS disk_status(BYTE drv) {
-    if (drv != 0) return STA_NODISK;
-    return 0;
+    if (drv != DRV_USB) return STA_NOINIT | STA_NODISK;
+    return usb_msc_disk_status();
 }
 
 DRESULT disk_read(BYTE drv, BYTE *buf, LBA_t sect, UINT count) {
-    if (drv != 0) return RES_PARERR;
-    uint32_t off = (uint32_t)(FFS_START + sect * SECTOR_SIZE);
-    memcpy(buf, (const void *)off, count * SECTOR_SIZE);
-    return RES_OK;
+    if (drv != DRV_USB) return RES_PARERR;
+    return usb_msc_disk_read(buf, sect, count);
 }
 
 DRESULT disk_write(BYTE drv, const BYTE *buf, LBA_t sect, UINT count) {
-    if (drv != 0) return RES_PARERR;
-    /* Flash writes handled by flashfs layer; this is for FAT metadata */
-    (void)buf; (void)sect; (void)count;
-    return RES_OK;  /* Simplified — full implementation would page-erase */
+    if (drv != DRV_USB) return RES_PARERR;
+    return usb_msc_disk_write(buf, sect, count);
 }
 
 DRESULT disk_ioctl(BYTE drv, BYTE cmd, void *buf) {
-    if (drv != 0) return RES_PARERR;
-    switch (cmd) {
-        case CTRL_SYNC:      return RES_OK;
-        case GET_SECTOR_COUNT: *(LBA_t*)buf = DISK_SIZE / SECTOR_SIZE; return RES_OK;
-        case GET_SECTOR_SIZE:  *(WORD *)buf = SECTOR_SIZE;             return RES_OK;
-        case GET_BLOCK_SIZE:   *(DWORD*)buf = 1;                       return RES_OK;
-    }
-    return RES_PARERR;
+    if (drv != DRV_USB) return RES_PARERR;
+    return usb_msc_disk_ioctl(cmd, buf);
+}
+
+/* FatFs timestamps: there is no real-time clock, so files get a fixed
+ * date (2024-01-01 00:00). Packed as FatFs expects. */
+DWORD get_fattime(void) {
+    return ((DWORD)(2024 - 1980) << 25) | ((DWORD)1 << 21) | ((DWORD)1 << 16);
 }

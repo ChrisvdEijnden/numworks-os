@@ -6,6 +6,7 @@
 void shell_init(void);
 void shell_redraw(void);
 void shell_handle_event(const kernel_event_t *ev);
+void shell_tick(void);     /* serial input; called every loop while shown */
 void shell_puts(const char *s);
 void shell_putc(char c);
 

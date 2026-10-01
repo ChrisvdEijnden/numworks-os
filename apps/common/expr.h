@@ -5,7 +5,8 @@
  * Evaluates expressions such as "2x^2 - 3sin(x)/ln(10)" natively,
  * without MicroPython. Supports + - * / ^ (or **), implicit
  * multiplication ("2x", "3(x+1)"), the variable x, the constants pi
- * and e, scientific notation (2E3) and the functions sin cos tan asin
+ * and e, the previous result ans, scientific notation (2E3) and the
+ * functions sin cos tan asin
  * acos atan sinh cosh tanh sqrt cbrt ln log (base 10) log10 exp abs.
  * Angles are in radians.
  * ================================================================ */
@@ -27,6 +28,9 @@ typedef enum {
  * (sqrt(-1), 1/0). */
 expr_status_t expr_eval(const char *src, double x, double *out);
 
+/* Value of `ans` in later expressions (the calculator's last result) */
+void expr_set_ans(double v);
+
 /* Short (Dutch) description of an error status */
 const char *expr_error(expr_status_t st);
 
@@ -34,5 +38,5 @@ const char *expr_error(expr_status_t st);
 void expr_format(double v, char *buf, int len);
 
 /* Text a key types into an expression, or NULL if none. SHIFT gives
- * the inverse function, and "(" / ")" on 9 / 0. */
+ * the inverse function (sin -> asin, ln -> exp, ...). */
 const char *expr_key_text(key_code_t k, bool shift);

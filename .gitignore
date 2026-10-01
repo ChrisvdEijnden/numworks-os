@@ -1,0 +1,14 @@
+# Build output
+/build/
+
+# MicroPython checkout and the package generated from it by `make mp`
+/micropython/
+/micropython-port/micropython_embed/
+/micropython-port/build-embed/
+
+# Editors / OS
+.DS_Store
+.idea/workspace.xml
+
+# Python
+__pycache__/

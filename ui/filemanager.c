@@ -13,7 +13,7 @@
  *   │   notes.txt        2.0 KB                │
  *   │   ...                                    │
  *   ├──────────────────────────────────────────┤
- *   │ OK:Open  SHIFT:Del (twice)  HOME:Back    │  ← hint bar
+ *   │ OK:Edit  VAR:New  SHIFT:Del (twice)      │  ← hint bar
  *   └──────────────────────────────────────────┘
  *
  * Code size target: < 5 KB
@@ -102,7 +102,7 @@ static void draw_footer(void) {
     } else if (s_msg[0]) {
         display_str(2, FOOTER_Y+3, s_msg, CYAN, DKGREY);
     } else {
-        display_str(2, FOOTER_Y+3, "OK:Bewerk  SHIFT:Wis  HOME:Terug",
+        display_str(2, FOOTER_Y+3, "OK:Bewerk  VAR:Nieuw  SHIFT:Wis  HOME:Terug",
                     YELLOW, DKGREY);
     }
 }
@@ -164,6 +164,10 @@ void fm_handle_event(const kernel_event_t *ev) {
         return;
     } else if (k == KEY_SHIFT) {
         if (s_nitem > 0) { s_del_armed = true; draw_footer(); }
+        return;
+    } else if (k == KEY_VAR) {
+        text_editor_new();
+        kernel_set_app(APP_TEXT_EDITOR);
         return;
     } else if (k == KEY_BACK || k == KEY_HOME) {
         kernel_set_app(APP_HOME);

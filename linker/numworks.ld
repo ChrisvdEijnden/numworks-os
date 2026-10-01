@@ -1,4 +1,9 @@
 /* ================================================================
+ * LEGACY — not used by the Makefile (which links with
+ * numworks_n0120.ld) and NOT correct for the STM32F730: that part has
+ * 64 KB of internal flash, and its 256 KB of RAM *includes* the DTCM at
+ * 0x2000_0000; there is no memory at 0x2004_0000. Kept for reference.
+ *
  * NumWorks OS — Linker Script
  * STM32F730R8T6: 512K Flash, 256K RAM, 64K DTCM
  * Flash layout:

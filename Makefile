@@ -89,9 +89,7 @@ CFLAGS := $(MCU) \
     -DSTM32F730xx -DARM_MATH_CM7 \
     $(GCC_ISYSTEM) \
     -Iinclude -Ihal -Ikernel -Ifs -Iusb -Ishell -Iui -Ibootloader \
-    -Imicropython-port \
-    -Imicropython/ports/minimal \
-    -Imicropython -Imicropython/py
+    -Imicropython-port
 
 ifdef DEBUG
     CFLAGS += -DDEBUG -g3
@@ -100,7 +98,6 @@ else
 endif
 
 # ── Linker flags ─────────────────────────────────────────────────
-MP_LIB    := micropython/ports/minimal/build/libmicropython.a
 LDSCRIPT  := linker/numworks_n0120.ld
 
 # ── Library resolution ───────────────────────────────────────────
@@ -152,12 +149,40 @@ LDFLAGS := $(MCU) \
     -nodefaultlibs \
     $(_LIBC_A) $(_LIBM_A) $(_LIBGCC)
 
-# Add MicroPython lib if it exists
-ifneq ($(wildcard $(MP_LIB)),)
-    LDFLAGS += $(MP_LIB)
+# ── MicroPython (optional) ───────────────────────────────────────
+# `make mp` generates micropython-port/micropython_embed/ (MicroPython's
+# embed port: core sources + headers generated for our configuration)
+# from a MicroPython checkout. When it exists, Python is compiled in;
+# otherwise mp_port.c is a stub that says Python isn't available.
+MICROPYTHON ?= micropython
+MP_EMBED    := micropython-port/micropython_embed
+
+ifneq ($(wildcard $(MP_EMBED)/genhdr/qstrdefs.generated.h),)
+MP_CORE_SRCS := $(wildcard $(MP_EMBED)/py/*.c) \
+                $(MP_EMBED)/shared/runtime/gchelper_generic.c \
+                $(MP_EMBED)/port/embed_util.c
+MP_GLUE_SRCS := micropython-port/modules/nwos/moddisplay.c \
+                micropython-port/modules/nwos/nwos_open.c
+SRCS_C += $(MP_CORE_SRCS) $(MP_GLUE_SRCS)
+OBJS   += $(patsubst %.c,$(BUILD)/%.o,$(MP_CORE_SRCS) $(MP_GLUE_SRCS))
+
+# MicroPython needs the real C library headers (newlib), not the minimal
+# ones in include/. Where the compiler doesn't find them by itself
+# (Homebrew arm-none-eabi-gcc), use the ones next to the libc.a found below.
+_NEWLIB_INC := $(firstword $(wildcard \
+    $(dir $(_LIBC_A))../../../../include/string.h \
+    $(dir $(_LIBC_A))../include/string.h))
+MP_CFLAGS := $(MCU) -std=gnu99 -Os -ffunction-sections -fdata-sections \
+    -fshort-enums -DNDEBUG -DNWOS_MICROPYTHON \
+    $(GCC_ISYSTEM) $(if $(_NEWLIB_INC),-isystem $(dir $(_NEWLIB_INC))) \
+    -Imicropython-port -I$(MP_EMBED)
+# Third-party core: no warnings. Our glue: the usual ones.
+$(patsubst %.c,$(BUILD)/%.o,$(MP_CORE_SRCS)): CFLAGS := $(MP_CFLAGS) -w
+$(patsubst %.c,$(BUILD)/%.o,$(MP_GLUE_SRCS) micropython-port/mp_port.c): \
+    CFLAGS := $(MP_CFLAGS) -Wall -Wextra -Wno-unused-parameter
 endif
 
-.PHONY: all clean flash dfu size dump mp phi delta openocd help restore print-libs print-newlib
+.PHONY: all clean distclean flash dfu size dump mp phi delta openocd help restore print-libs print-newlib
 
 # Refuse to flash the image at an address it isn't linked for: it would
 # not run there (the vector table and every absolute address would be wrong).
@@ -172,10 +197,12 @@ endef
 
 all: $(BUILD)/$(TARGET).bin size
 
+# -MMD -MP: also write a .d file listing the headers each object uses,
+# so changing a header (e.g. include/config.h) rebuilds what depends on it
 $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	@echo "  CC  $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
+	@$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD)/%.o: %.s
 	@mkdir -p $(dir $@)
@@ -193,12 +220,17 @@ $(BUILD)/$(TARGET).bin: $(BUILD)/$(TARGET).elf
 size: $(BUILD)/$(TARGET).elf
 	@$(SIZE) $<
 
-# ── Build MicroPython static library ─────────────────────────────
+# ── Generate the MicroPython embed package ───────────────────────
+# Needs a MicroPython checkout (default ./micropython) and python3:
+#   git clone https://github.com/micropython/micropython
+#   make mp && make
 mp:
-	$(MAKE) -C micropython/ports/minimal \
-	    CROSS_COMPILE=$(CROSS) \
-	    CFLAGS_EXTRA="-DMICROPY_CONFIG_FILE='\"../../micropython-port/mpconfigport.h\"'" \
-	    libmicropython.a
+	@test -f $(MICROPYTHON)/ports/embed/embed.mk || { \
+	  echo "error: no MicroPython checkout at '$(MICROPYTHON)'."; \
+	  echo "       git clone https://github.com/micropython/micropython"; \
+	  echo "       (or: make mp MICROPYTHON=/path/to/micropython)"; exit 1; }
+	$(MAKE) -C micropython-port -f micropython_embed.mk \
+	    MICROPYTHON_TOP=$(abspath $(MICROPYTHON))
 
 # ── Flash methods ─────────────────────────────────────────────────
 
@@ -246,6 +278,10 @@ dump: $(BUILD)/$(TARGET).elf
 clean:
 	rm -rf $(BUILD)
 
+# Also drop the generated MicroPython package (rebuild with `make mp`)
+distclean: clean
+	rm -rf $(MP_EMBED) micropython-port/build-embed
+
 help:
 	@echo "Targets:"
 	@echo "  all      - Build firmware"
@@ -253,7 +289,7 @@ help:
 	@echo "  delta    - Flash via Delta bootloader"
 	@echo "  openocd  - Flash via ST-Link (dev)"
 	@echo "  flash    - Overwrite stock firmware in QSPI (needs CONFIRM=...)"
-	@echo "  mp       - Build MicroPython static library"
+	@echo "  mp       - Generate MicroPython (needs ./micropython checkout)"
 	@echo "  size     - Show firmware size"
 	@echo "  clean    - Clean build artefacts"
 
@@ -287,6 +323,8 @@ print-newlib:
 # epsilon-qspi-backup.bin was taken after an old build of this OS had
 # already been flashed over the start of the stock firmware, so it can't
 # restore a bootable calculator. Refuse rather than flash it.
+-include $(OBJS:.o=.d)
+
 restore:
 	@echo "Refusing: epsilon-qspi-backup.bin is not a working stock image."
 	@echo "Its first 108 KB (0x0-0x1AFFF) is an old build of this OS, not the"

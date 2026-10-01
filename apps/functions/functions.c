@@ -45,6 +45,7 @@ static float    s_ymax   =  6.0f;
 static char     s_entry[FN_LEN];
 static int      s_elen   = 0;
 static bool     s_shift  = false;
+static int      s_row    = 0;   /* row being edited; s_nfn = the empty "new" row */
 static const char *s_msg = "";   /* last entry error, shown under the list */
 
 static const uint16_t COLOURS[MAX_FNS] = {
@@ -131,21 +132,21 @@ static void draw_enter(void) {
     display_str(6, 8, "Functies invoeren", WHITE, RGB(30,80,200));
     for (int i = 0; i < MAX_FNS; i++) {
         int y = HEADER_H + 8 + i*30;
-        bool active = (i == s_nfn && s_view == VIEW_ENTER);
+        bool active = (i == s_row && s_view == VIEW_ENTER);
         uint16_t bg = active ? RGB(40,40,70) : RGB(20,20,35);
         display_fill_rect(0, y, LCD_WIDTH, 24, bg);
         char label[256];
         snprintf(label, sizeof(label), "f%d(x)= %s%s",
-                 i+1, i < s_nfn ? s_fn[i] : (active ? s_entry : ""),
+                 i+1, active ? s_entry : (i < s_nfn ? s_fn[i] : ""),
                  active ? "_" : "");
         display_str(4, y+6, label, COLOURS[i], bg);
     }
-    display_str(4, HEADER_H+140, "OK:Opslaan  TOOLBOX:Grafiek",
+    display_str(4, HEADER_H+140, "OK:Opslaan  UP/DOWN:Kies  TOOLBOX:Grafiek",
                 YELLOW, RGB(10,10,20));
-    display_str(4, HEADER_H+154, "VAR:Tabel  HOME:Terug",
+    display_str(4, HEADER_H+154, "VAR:Tabel  leeg+OK:Wis  HOME:Terug",
                 YELLOW, RGB(10,10,20));
-    display_str(4, HEADER_H+168, s_shift ? "SHIFT actief: 9=(  0=)  sin=asin"
-                                         : "SHIFT 9: (   SHIFT 0: )   XNT: x",
+    display_str(4, HEADER_H+168, s_shift ? "SHIFT actief: sin=asin  ln=exp"
+                                         : "XNT: x   SHIFT: inverse functie",
                 s_shift ? CYAN : GREY, RGB(10,10,20));
     if (s_msg[0])
         display_str(4, HEADER_H+184, s_msg, RED, RGB(10,10,20));
@@ -166,8 +167,19 @@ void functions_redraw(void) {
     for (int i = 0; i < s_nfn; i++) plot_fn(i);
 }
 
+/* Put row r's function (or nothing, for the new row) in the entry line */
+static void select_row(int r) {
+    int last = s_nfn < MAX_FNS ? s_nfn : MAX_FNS - 1;
+    s_row = r < 0 ? 0 : (r > last ? last : r);
+    if (s_row < s_nfn) strncpy(s_entry, s_fn[s_row], FN_LEN-1);
+    else               s_entry[0] = 0;
+    s_entry[FN_LEN-1] = 0;
+    s_elen = (int)strlen(s_entry);
+}
+
 void functions_init(void) {
-    s_nfn = 0; s_sel = 0; s_view = VIEW_ENTER; s_elen = 0;
+    s_nfn = 0; s_sel = 0; s_view = VIEW_ENTER; s_elen = 0; s_row = 0;
+    s_entry[0] = 0;
     for (int i = 0; i < MAX_FNS; i++) {
         s_fn_colour[i] = COLOURS[i];
         s_fn[i][0] = 0;
@@ -193,8 +205,21 @@ void functions_handle_event(const kernel_event_t *ev) {
             s_shift = !s_shift;
         } else if (k == KEY_BACKSPACE && s_elen > 0) {
             s_entry[--s_elen] = 0;
+        } else if (k == KEY_UP) {
+            select_row(s_row - 1);
+        } else if (k == KEY_DOWN) {
+            select_row(s_row + 1);
         } else if (key_is_exe(k)) {
-            if (s_elen > 0 && s_nfn < MAX_FNS) {
+            if (s_elen == 0) {
+                /* Emptied an existing function: delete it */
+                if (s_row < s_nfn) {
+                    for (int i = s_row; i < s_nfn - 1; i++)
+                        memcpy(s_fn[i], s_fn[i+1], FN_LEN);
+                    s_nfn--;
+                    s_fn[s_nfn][0] = 0;
+                    select_row(s_row);
+                }
+            } else {
                 /* Only store functions that parse; out-of-domain values
                  * (e.g. ln(x) at x=0) are fine and just leave gaps. */
                 double y;
@@ -202,12 +227,11 @@ void functions_handle_event(const kernel_event_t *ev) {
                 if (st != EXPR_OK) {
                     s_msg = expr_error(st);
                 } else {
-                    strncpy(s_fn[s_nfn], s_entry, FN_LEN-1);
-                    s_nfn++;
-                    s_elen = 0; s_entry[0] = 0;
+                    strncpy(s_fn[s_row], s_entry, FN_LEN-1);
+                    s_fn[s_row][FN_LEN-1] = 0;
+                    if (s_row == s_nfn) s_nfn++;   /* filled the new row */
+                    select_row(s_nfn);             /* on to the next empty row */
                 }
-            } else if (s_nfn >= MAX_FNS) {
-                s_msg = "maximaal 4 functies";
             }
         } else {
             /* Append typed text */
