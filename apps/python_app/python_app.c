@@ -113,7 +113,7 @@ void python_app_handle_event(const kernel_event_t *ev) {
     if (k == KEY_HOME || k == KEY_BACK) { kernel_set_app(APP_HOME); return; }
     if (k == KEY_SHIFT) { s_shift = !s_shift; draw_input(); return; }
     if (k == KEY_ALPHA) { s_alpha = !s_alpha; draw_input(); return; }
-    if (k == KEY_EXE || k == KEY_OK) { execute(); python_app_redraw(); return; }
+    if (key_is_exe(k)) { execute(); python_app_redraw(); return; }
     if (k == KEY_BACKSPACE) {
         if (s_ilen > 0) s_input[--s_ilen] = 0;
         draw_input(); return;

@@ -49,31 +49,37 @@ void kernel_run(void) {
 
     g_kernel.state = KERNEL_RUNNING;
 
+    /* Each task sleeps one tick after it runs; when none is ready the
+     * idle task puts the CPU to sleep until the next interrupt. */
     while (1) {
         scheduler_run_next();
-        if (scheduler_all_waiting()) {
-            __asm volatile("wfi");
-        }
     }
 }
 
 /* ── Built-in tasks ──────────────────────────────────────────── */
 void task_idle(void) {
     g_kernel.idle_count++;
+    /* Sleep until the next interrupt (SysTick at the latest). Interrupts
+     * are masked around the check so a tick that wakes a task between
+     * the check and WFI isn't missed: WFI still wakes on a pending
+     * interrupt while PRIMASK is set, and it is taken right after. */
+    __asm volatile("cpsid i" ::: "memory");
+    if (!scheduler_ready_above(TASK_PRIO_IDLE)) __asm volatile("wfi");
+    __asm volatile("cpsie i" ::: "memory");
     scheduler_yield();
 }
 
 void task_input(void) {
     key_event_t ev;
-    if (keyboard_poll(&ev)) {
+    while (keyboard_poll(&ev)) {
         kernel_post_event(ev.key, ev.action);
     }
-    scheduler_yield();
+    scheduler_sleep(1);
 }
 
 void task_display(void) {
     display_update();
-    scheduler_yield();
+    scheduler_sleep(1);
 }
 
 /* App dispatch */
@@ -101,7 +107,7 @@ void task_shell(void) {
         kernel_set_app(g_kernel.app_state);
     }
     usb_cdc_process();
-    scheduler_yield();
+    scheduler_sleep(1);
 }
 
 /* ── Event queue ─────────────────────────────────────────────── */

@@ -113,8 +113,8 @@ int main(void) {
     /* 4. USB CDC (virtual serial for PC transfer) */
     usb_cdc_init();
 
-    /* 5. USB Host (for USB drives) */
-    usb_host_init();
+    /* 5. USB host mode (for USB drives) is not started: the OTG core is in
+     *    device mode for CDC, and the board can't power a drive on VBUS. */
 
     /* 6. MicroPython */
     mp_init_port();

@@ -169,7 +169,7 @@ void shell_handle_event(const kernel_event_t *ev) {
     if (k == KEY_ALPHA) { s_alpha = !s_alpha; s_dirty = true; refresh(); return; }
 
     /* Navigation */
-    if (k == KEY_EXE || k == KEY_OK) {
+    if (key_is_exe(k)) {
         execute(); s_shift = false; s_alpha = false;
         refresh(); return;
     }

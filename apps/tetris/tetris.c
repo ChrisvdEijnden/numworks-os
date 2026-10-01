@@ -183,7 +183,7 @@ void tetris_handle_event(const kernel_event_t *ev) {
 
     if (k == KEY_HOME || k == KEY_BACK) { kernel_set_app(APP_HOME); return; }
     if (s_game_over) {
-        if (k == KEY_EXE) { tetris_init(); tetris_redraw(); }
+        if (key_is_exe(k)) { tetris_init(); tetris_redraw(); }
         return;
     }
 
@@ -198,7 +198,7 @@ void tetris_handle_event(const kernel_event_t *ev) {
     } else if (k == KEY_UP) {
         int nr = (s_prot+1)%4;
         if (piece_fits(s_px,s_py,s_ptype,nr)) { s_prot=nr; redraw=true; }
-    } else if (k == KEY_EXE) {
+    } else if (key_is_exe(k)) {
         /* Hard drop */
         while (piece_fits(s_px,s_py+1,s_ptype,s_prot)) s_py++;
         stamp_piece(); clear_lines(); new_piece(); draw_board(); redraw=true;

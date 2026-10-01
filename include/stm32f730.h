@@ -69,6 +69,13 @@ typedef struct {
 #define GPIOD ((GPIO_TypeDef *)(AHB1_BASE + 0x0C00UL))
 #define GPIOE ((GPIO_TypeDef *)(AHB1_BASE + 0x1000UL))
 
+/* True if the pin is in alternate-function mode, i.e. already owned by a
+ * peripheral (QSPI, FMC, USB...) that the bootloader or a driver set up.
+ * Reconfiguring such a pin can kill the bus we are running from. */
+static inline bool gpio_pin_is_af(const GPIO_TypeDef *p, uint32_t pin) {
+    return ((p->MODER >> (pin * 2U)) & 3U) == 2U;
+}
+
 /* USART — STM32F7 layout (differs from F1/F4: no SR/DR, see RM0431) */
 typedef struct {
     vu32 CR1;  vu32 CR2;  vu32 CR3; vu32 BRR;
@@ -138,6 +145,25 @@ typedef struct { vu32 CTRL; vu32 LOAD; vu32 VAL; vu32 CALIB; } SysTick_Type;
 #define SysTick_CTRL_CLKSOURCE (1U<<2)
 #define SysTick_CTRL_TICKINT   (1U<<1)
 #define SysTick_CTRL_ENABLE    (1U<<0)
+
+/* System control block: caches */
+#define SCB_CCR       (*(volatile uint32_t *)0xE000ED14UL)
+#define SCB_CCR_IC    (1U<<17)
+#define SCB_ICIALLU   (*(volatile uint32_t *)0xE000EF50UL)  /* invalidate I-cache */
+
+/* MPU (ARMv7-M) */
+#define MPU_TYPE      (*(volatile uint32_t *)0xE000ED90UL)
+#define MPU_CTRL      (*(volatile uint32_t *)0xE000ED94UL)
+#define MPU_RNR       (*(volatile uint32_t *)0xE000ED98UL)
+#define MPU_RBAR      (*(volatile uint32_t *)0xE000ED9CUL)
+#define MPU_RASR      (*(volatile uint32_t *)0xE000EDA0UL)
+#define MPU_CTRL_ENABLE      (1U<<0)
+#define MPU_CTRL_PRIVDEFENA  (1U<<2)   /* default map where no region matches */
+#define MPU_RASR_ENABLE      (1U<<0)
+#define MPU_RASR_SIZE(log2)  (((log2) - 1U) << 1)   /* region = 2^log2 bytes */
+#define MPU_RASR_B           (1U<<16)
+#define MPU_RASR_AP_FULL     (3U<<24)
+#define MPU_RASR_XN          (1U<<28)
 
 /* NVIC */
 #define NVIC_BASE 0xE000E100UL

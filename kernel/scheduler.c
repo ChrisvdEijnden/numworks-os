@@ -57,6 +57,17 @@ void scheduler_yield(void) {
     s_yield = true;
 }
 
+void scheduler_sleep(uint8_t ticks) {
+    s_tasks[s_current].waiting = ticks;
+}
+
+bool scheduler_ready_above(uint8_t prio) {
+    for (uint8_t i = 0; i < s_ntasks; i++) {
+        if (s_tasks[i].prio > prio && !s_tasks[i].waiting) return true;
+    }
+    return false;
+}
+
 bool scheduler_all_waiting(void) {
     for (uint8_t i = 0; i < s_ntasks; i++) {
         if (!s_tasks[i].waiting) return false;

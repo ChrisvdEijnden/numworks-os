@@ -16,6 +16,8 @@
 
 /* Forward declarations */
 static void clocks_init(void);
+static void mpu_init(void);
+static void icache_enable(void);
 static void systick_init(void);
 static void gpio_init(void);
 
@@ -38,6 +40,8 @@ void delay_ms(uint32_t ms) {
  * ================================================================ */
 void boot_main(void) {
     clocks_init();
+    mpu_init();
+    icache_enable();
     systick_init();
     gpio_init();
     extern int main(void);
@@ -116,6 +120,43 @@ static void clocks_init(void) {
     while (!(RCC->CR & RCC_CR_PLLRDY)) {}
     RCC->CFGR = (RCC->CFGR & ~RCC_CFGR_SW_MASK) | RCC_CFGR_SW_PLL;
     while ((RCC->CFGR & RCC_CFGR_SWS_MASK) != RCC_CFGR_SWS_PLL) {}
+}
+
+/* ================================================================
+ * MPU: the default Cortex-M7 memory map treats 0x6000_0000 (FMC bank 1,
+ * the LCD) as Normal memory, where the core may merge, reorder or
+ * speculatively issue accesses — wrong for an LCD command/data register
+ * pair. Map it as Device memory, execute-never. Regions a bootloader
+ * left behind are cleared first so the result is the default map plus
+ * this one region, whatever ran before us.
+ * ================================================================ */
+static void mpu_init(void) {
+    __asm volatile("dmb" ::: "memory");
+    MPU_CTRL = 0;
+    uint32_t nregions = (MPU_TYPE >> 8) & 0xFFU;
+    for (uint32_t i = 0; i < nregions; i++) {
+        MPU_RNR  = i;
+        MPU_RASR = 0;
+    }
+    if (nregions > 0) {
+        MPU_RNR  = 0;
+        MPU_RBAR = 0x60000000UL;                 /* FMC bank 1, 256 MB */
+        MPU_RASR = MPU_RASR_XN | MPU_RASR_AP_FULL | MPU_RASR_B |  /* Device */
+                   MPU_RASR_SIZE(28) | MPU_RASR_ENABLE;
+        MPU_CTRL = MPU_CTRL_PRIVDEFENA | MPU_CTRL_ENABLE;
+    }
+    __asm volatile("dsb\n isb" ::: "memory");
+}
+
+/* The I-cache matters most here: code runs from QSPI flash. The D-cache
+ * stays off; enabling it needs cache maintenance around flash writes
+ * (fs/flashfs.c) and any future DMA. */
+static void icache_enable(void) {
+    __asm volatile("dsb\n isb" ::: "memory");
+    SCB_ICIALLU = 0;
+    __asm volatile("dsb\n isb" ::: "memory");
+    SCB_CCR |= SCB_CCR_IC;
+    __asm volatile("dsb\n isb" ::: "memory");
 }
 
 /* ── SysTick: 1 kHz ──────────────────────────────────────────── */

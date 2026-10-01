@@ -3,14 +3,13 @@
  * File: apps/calculator/calculator.c
  *
  * Displays a standard calculator layout on the 320x240 screen.
- * Uses MicroPython's math module for trig/log/sqrt evaluation.
- * For full expression evaluation, expressions are passed to
- * MicroPython's eval() via mp_exec_eval_str().
+ * Expressions are evaluated natively by apps/common/expr.c, so the
+ * calculator works without MicroPython.
  * ================================================================ */
 #include "calculator.h"
+#include "../common/expr.h"
 #include "../../hal/display.h"
 #include "../../hal/keyboard.h"
-#include "../../micropython-port/mp_port.h"
 #include "../../include/config.h"
 #include "../../include/string.h"
 #include "../../include/stdio.h"
@@ -48,33 +47,16 @@ static void calc_redraw_display(void) {
 }
 
 static void evaluate(void) {
-    if (s_elen == 0) { s_result[0] = 0; return; }
-    /* Evaluate via MicroPython */
-    char pycode[256];
-    snprintf(pycode, sizeof(pycode),
-             "import math,sys\n"
-             "try:\n"
-             "  _r=eval('%s')\n"
-             "  print(_r)\n"
-             "except Exception as e:\n"
-             "  print('ERR:'+str(e))\n", s_expr);
-    char out[64];
-    int r = mp_exec_capture(pycode, out, sizeof(out));
-    if (r >= 0 && strncmp(out, "ERR:", 4) == 0) {
-        snprintf(s_result, sizeof(s_result), "Fout: %s", out+4);
+    if (s_elen == 0) { s_result[0] = 0; s_error = false; return; }
+    double v;
+    expr_status_t st = expr_eval(s_expr, 0.0, &v);
+    if (st != EXPR_OK) {
+        snprintf(s_result, sizeof(s_result), "Fout: %s", expr_error(st));
         s_error = true;
-    } else if (r >= 0) {
-        strncpy(s_result, out, sizeof(s_result)-1);
-        s_result[sizeof(s_result)-1] = 0;
-        /* Remove trailing newline */
-        int l = (int)strlen(s_result);
-        while (l > 0 && (s_result[l-1] == '\n' || s_result[l-1] == '\r'))
-            s_result[--l] = 0;
-        s_error = false;
-    } else {
-        snprintf(s_result, sizeof(s_result), "eval mislukt");
-        s_error = true;
+        return;
     }
+    expr_format(v, s_result, sizeof(s_result));
+    s_error = false;
 }
 
 void calculator_redraw(void) {
@@ -86,17 +68,17 @@ void calculator_redraw(void) {
 
     /* Key layout hint grid */
     const char *hints[] = {
-        "7","8","9","DEL",
+        "7","8","9","/",
         "4","5","6","*",
         "1","2","3","-",
-        "0",".","=","+",
+        "0",".","^","+",
         "sin","cos","tan","sqrt",
-        "ln","log","(",")",
-        "pi","e","^","/"
+        "ln","log","SHIFT 9: (","SHIFT 0: )",
     };
+    int nhints = (int)(sizeof(hints) / sizeof(hints[0]));
     int hx = 4, hy = HEADER_H + DISP_H + 8;
     int bw = 76, bh = 20, gap = 2;
-    for (int i = 0; i < 28; i++) {
+    for (int i = 0; i < nhints; i++) {
         int col = i % 4;
         int row = i / 4;
         int x = hx + col*(bw+gap);
@@ -105,6 +87,8 @@ void calculator_redraw(void) {
         display_rect(x, y, bw, bh, RGB(80,80,120));
         display_str(x+2, y+6, hints[i], RGB(220,220,255), RGB(40,40,60));
     }
+    display_str(4, hy + 6*(bh+gap) + 2, "OK: =   SHIFT: inverse   DEL: wissen",
+                YELLOW, C_BG);
 }
 
 void calculator_init(void) {
@@ -124,7 +108,7 @@ void calculator_handle_event(const kernel_event_t *ev) {
     if (k == KEY_ALPHA) { s_alpha = !s_alpha; calc_redraw_display(); return; }
 
     /* EXE = evaluate */
-    if (k == KEY_EXE || k == KEY_OK) { evaluate(); calc_redraw_display(); return; }
+    if (key_is_exe(k)) { evaluate(); calc_redraw_display(); return; }
 
     /* Backspace */
     if (k == KEY_BACKSPACE) {
@@ -132,38 +116,16 @@ void calculator_handle_event(const kernel_event_t *ev) {
         calc_redraw_display(); return;
     }
 
-    /* Map keys to characters */
+    /* Map keys to text: letters in ALPHA mode, everything else via expr */
     const char *ins = NULL;
-    switch (k) {
-        case KEY_0: ins="0"; break; case KEY_1: ins="1"; break;
-        case KEY_2: ins="2"; break; case KEY_3: ins="3"; break;
-        case KEY_4: ins="4"; break; case KEY_5: ins="5"; break;
-        case KEY_6: ins="6"; break; case KEY_7: ins="7"; break;
-        case KEY_8: ins="8"; break; case KEY_9: ins="9"; break;
-        case KEY_DOT:   ins=".";    break;
-        case KEY_PLUS:  ins="+";    break;
-        case KEY_MINUS: ins="-";    break;
-        case KEY_MUL:   ins="*";    break;
-        case KEY_DIV:   ins="/";    break;
-        case KEY_POW:   ins="**";   break;
-        case KEY_SQRT:  ins = s_shift ? "math.cbrt(" : "math.sqrt("; break;
-        case KEY_SIN:   ins = s_shift ? "math.asin(" : "math.sin(";  break;
-        case KEY_COS:   ins = s_shift ? "math.acos(" : "math.cos(";  break;
-        case KEY_TAN:   ins = s_shift ? "math.atan(" : "math.tan(";  break;
-        case KEY_LN:    ins = s_shift ? "math.exp("  : "math.log(";  break;
-        case KEY_LOG:   ins = s_shift ? "10**"       : "math.log10(";break;
-        case KEY_EXP:   ins="math.e"; break;
-        default:
-            if (s_alpha) {
-                char c = key_to_char(k, s_shift, true);
-                if (c) { static char tmp[2]; tmp[0]=c; tmp[1]=0; ins=tmp; }
-            }
-            break;
-    }
+    static char letter[2];
+    char c = s_alpha ? key_to_char(k, s_shift, true) : 0;
+    if (c) { letter[0] = c; letter[1] = 0; ins = letter; }
+    else   ins = expr_key_text(k, s_shift);
     if (ins && s_elen + (int)strlen(ins) < 127) {
         strcat(s_expr, ins);
         s_elen = (int)strlen(s_expr);
-        calc_redraw_display();
         s_shift = false;
+        calc_redraw_display();
     }
 }

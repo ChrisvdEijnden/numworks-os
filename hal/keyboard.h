@@ -32,4 +32,8 @@ typedef struct {
 void keyboard_init(void);
 bool keyboard_poll(key_event_t *ev);  /* Returns true if event ready */
 bool keyboard_is_pressed(key_code_t k);
+
+/* OK and EXE both confirm. Always test for "execute" with this, since
+ * KEY_EXE has no position in the key matrix yet. */
+static inline bool key_is_exe(key_code_t k) { return k == KEY_EXE || k == KEY_OK; }
 char key_to_char(key_code_t k, bool shift, bool alpha);

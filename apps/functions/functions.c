@@ -15,7 +15,7 @@
 #include "functions.h"
 #include "../../hal/display.h"
 #include "../../hal/keyboard.h"
-#include "../../micropython-port/mp_port.h"
+#include "../common/expr.h"
 #include "../../include/config.h"
 #include "../../include/string.h"
 #include "../../include/stdio.h"
@@ -44,6 +44,8 @@ static float    s_ymin   = -6.0f;
 static float    s_ymax   =  6.0f;
 static char     s_entry[FN_LEN];
 static int      s_elen   = 0;
+static bool     s_shift  = false;
+static const char *s_msg = "";   /* last entry error, shown under the list */
 
 static const uint16_t COLOURS[MAX_FNS] = {
     RGB(80,200,255), RGB(255,160,40), RGB(100,255,100), RGB(255,80,200)
@@ -58,15 +60,11 @@ static int wy_to_scr(float wy) {
     return GRAPH_Y0 + y;
 }
 
-/* Evaluate f(x) via MicroPython — returns NaN on error */
+/* Evaluate f(x) — returns NaN on error or outside the domain */
 static float eval_fn(const char *expr, float x) {
-    char code[128];
-    snprintf(code, sizeof(code),
-             "import math\ntry:\n x=%g\n print(float(%s))\nexcept:\n print('nan')\n",
-             (double)x, expr);
-    char out[32];
-    if (mp_exec_capture(code, out, sizeof(out)) < 0) return NAN;
-    return strtof(out, NULL);
+    double y;
+    if (expr_eval(expr, (double)x, &y) != EXPR_OK) return NAN;
+    return (float)y;
 }
 
 static void draw_axes(void) {
@@ -142,10 +140,15 @@ static void draw_enter(void) {
                  active ? "_" : "");
         display_str(4, y+6, label, COLOURS[i], bg);
     }
-    display_str(4, HEADER_H+140, "EXE:Opslaan  TOOLBOX:Grafiek",
+    display_str(4, HEADER_H+140, "OK:Opslaan  TOOLBOX:Grafiek",
                 YELLOW, RGB(10,10,20));
     display_str(4, HEADER_H+154, "VAR:Tabel  HOME:Terug",
                 YELLOW, RGB(10,10,20));
+    display_str(4, HEADER_H+168, s_shift ? "SHIFT actief: 9=(  0=)  sin=asin"
+                                         : "SHIFT 9: (   SHIFT 0: )   XNT: x",
+                s_shift ? CYAN : GREY, RGB(10,10,20));
+    if (s_msg[0])
+        display_str(4, HEADER_H+184, s_msg, RED, RGB(10,10,20));
 }
 
 void functions_redraw(void) {
@@ -185,42 +188,34 @@ void functions_handle_event(const kernel_event_t *ev) {
     if (k == KEY_ALPHA)   { s_view = VIEW_ENTER; functions_redraw(); return; }
 
     if (s_view == VIEW_ENTER) {
-        if (k == KEY_BACKSPACE && s_elen > 0) {
+        s_msg = "";
+        if (k == KEY_SHIFT) {
+            s_shift = !s_shift;
+        } else if (k == KEY_BACKSPACE && s_elen > 0) {
             s_entry[--s_elen] = 0;
-        } else if (k == KEY_EXE || k == KEY_OK) {
+        } else if (key_is_exe(k)) {
             if (s_elen > 0 && s_nfn < MAX_FNS) {
-                strncpy(s_fn[s_nfn], s_entry, FN_LEN-1);
-                s_nfn++;
-                s_elen = 0; s_entry[0] = 0;
+                /* Only store functions that parse; out-of-domain values
+                 * (e.g. ln(x) at x=0) are fine and just leave gaps. */
+                double y;
+                expr_status_t st = expr_eval(s_entry, 0.0, &y);
+                if (st != EXPR_OK) {
+                    s_msg = expr_error(st);
+                } else {
+                    strncpy(s_fn[s_nfn], s_entry, FN_LEN-1);
+                    s_nfn++;
+                    s_elen = 0; s_entry[0] = 0;
+                }
+            } else if (s_nfn >= MAX_FNS) {
+                s_msg = "maximaal 4 functies";
             }
         } else {
-            /* Append typed character */
-            const char *ins = NULL;
-            switch(k){
-                case KEY_0: ins="0"; break; case KEY_1: ins="1"; break;
-                case KEY_2: ins="2"; break; case KEY_3: ins="3"; break;
-                case KEY_4: ins="4"; break; case KEY_5: ins="5"; break;
-                case KEY_6: ins="6"; break; case KEY_7: ins="7"; break;
-                case KEY_8: ins="8"; break; case KEY_9: ins="9"; break;
-                case KEY_DOT:   ins=".";    break;
-                case KEY_PLUS:  ins="+";    break;
-                case KEY_MINUS: ins="-";    break;
-                case KEY_MUL:   ins="*";    break;
-                case KEY_DIV:   ins="/";    break;
-                case KEY_POW:   ins="**";   break;
-                case KEY_SIN:   ins="sin("; break;
-                case KEY_COS:   ins="cos("; break;
-                case KEY_TAN:   ins="tan("; break;
-                case KEY_SQRT:  ins="sqrt(";break;
-                case KEY_LN:    ins="log("; break;
-                case KEY_LOG:   ins="log10("; break;
-                case KEY_EXP:   ins="exp("; break;
-                case KEY_XNT:   ins="x";    break;
-                default: break;
-            }
+            /* Append typed text */
+            const char *ins = expr_key_text(k, s_shift);
             if (ins && s_elen + (int)strlen(ins) < FN_LEN-1) {
                 strcat(s_entry, ins);
                 s_elen = (int)strlen(s_entry);
+                s_shift = false;
             }
         }
         draw_enter();
@@ -234,15 +229,13 @@ void functions_handle_event(const kernel_event_t *ev) {
         else if (k == KEY_RIGHT) { s_xmin += dx; s_xmax += dx; functions_redraw(); }
         else if (k == KEY_UP)    { s_ymin += dy; s_ymax += dy; functions_redraw(); }
         else if (k == KEY_DOWN)  { s_ymin -= dy; s_ymax -= dy; functions_redraw(); }
-        else if (k == KEY_PLUS)  {
-            float cx = (s_xmin+s_xmax)/2, cy=(s_ymin+s_ymax)/2;
-            s_xmin=cx-(s_xmax-s_xmin)*0.4f; s_xmax=cx+(s_xmax-s_xmin)*0.4f;
-            s_ymin=cy-(s_ymax-s_ymin)*0.4f; s_ymax=cy+(s_ymax-s_ymin)*0.4f;
-            functions_redraw();
-        } else if (k == KEY_MINUS) {
-            float cx = (s_xmin+s_xmax)/2, cy=(s_ymin+s_ymax)/2;
-            s_xmin=cx-(s_xmax-s_xmin)*0.6f; s_xmax=cx+(s_xmax-s_xmin)*0.6f;
-            s_ymin=cy-(s_ymax-s_ymin)*0.6f; s_ymax=cy+(s_ymax-s_ymin)*0.6f;
+        else if (k == KEY_PLUS || k == KEY_MINUS) {
+            /* Zoom about the centre; half-ranges come from the old bounds */
+            float f  = (k == KEY_PLUS) ? 0.4f : 0.6f;
+            float cx = (s_xmin+s_xmax)/2, cy = (s_ymin+s_ymax)/2;
+            float hw = (s_xmax-s_xmin)*f,  hh = (s_ymax-s_ymin)*f;
+            s_xmin = cx-hw; s_xmax = cx+hw;
+            s_ymin = cy-hh; s_ymax = cy+hh;
             functions_redraw();
         }
     }

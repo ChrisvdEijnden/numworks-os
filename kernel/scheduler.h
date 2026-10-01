@@ -14,7 +14,7 @@ typedef struct {
     task_fn_t   fn;
     const char *name;
     uint8_t     prio;
-    uint8_t     waiting;
+    volatile uint8_t waiting;   /* ticks left to sleep; decremented by SysTick */
     uint32_t    run_count;
 } task_t;
 
@@ -24,3 +24,5 @@ void  scheduler_run_next(void);
 void  scheduler_tick(void);
 void  scheduler_yield(void);
 bool  scheduler_all_waiting(void);
+void  scheduler_sleep(uint8_t ticks);         /* current task skips `ticks` SysTicks */
+bool  scheduler_ready_above(uint8_t prio);    /* a task above `prio` can run now */

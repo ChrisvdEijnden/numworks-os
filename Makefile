@@ -16,7 +16,10 @@ TARGET  := numworks_os_n0120
 BUILD   := build
 
 CPU     := cortex-m7
-FPU     := fpv5-d16
+# The STM32F730 has a single-precision FPU: fpv5-d16 would emit (and pull
+# in a newlib built with) double-precision instructions that fault on it.
+# Doubles still work, through libgcc's software routines.
+FPU     := fpv5-sp-d16
 FLOAT   := hard
 MCU     := -mcpu=$(CPU) -mthumb -mfpu=$(FPU) -mfloat-abi=$(FLOAT)
 
@@ -43,6 +46,7 @@ SRCS_C := \
     usb/usb_cdc.c \
     usb/usb_host.c \
     micropython-port/mp_port.c \
+    apps/common/expr.c \
     apps/home/home.c \
     apps/calculator/calculator.c \
     apps/functions/functions.c \

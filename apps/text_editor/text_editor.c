@@ -38,6 +38,7 @@ static char  s_filename[FFS_NAME_LEN] = "";
 static bool  s_modified = false;
 static bool  s_shift = false;
 static bool  s_alpha = false;
+static const char *s_status = "";   /* one-shot message in the footer */
 
 /* Count lines */
 static int count_lines(void) {
@@ -102,21 +103,30 @@ static void draw_all(void) {
     }
 }
 
-void text_editor_redraw(void) {
-    display_fill(C_BG);
-    display_fill_rect(0,0,LCD_WIDTH,HEADER_H,C_HDR);
+/* Header (file name, unsaved marker) and footer (status or key hints) */
+static void draw_bars(void) {
+    display_fill_rect(0, 0, LCD_WIDTH, HEADER_H, C_HDR);
     char hdr[48];
     snprintf(hdr, sizeof(hdr), "Editor: %s%s",
              s_filename[0]?s_filename:"[nieuw]",
              s_modified?" *":"");
     display_str(6, 6, hdr, WHITE, C_HDR);
-    draw_all();
-    /* Footer */
+
     display_fill_rect(0, LCD_HEIGHT-FOOTER_H, LCD_WIDTH, FOOTER_H, RGB(25,25,40));
     char foot[64];
-    snprintf(foot, sizeof(foot), "%s%s  SHIFT+EXE:Opslaan  HOME:Terug",
-             s_shift?"SHF ":"", s_alpha?"ABC":"   ");
-    display_str(2, LCD_HEIGHT-FOOTER_H+3, foot, YELLOW, RGB(25,25,40));
+    if (s_status[0])
+        snprintf(foot, sizeof(foot), "%s", s_status);
+    else
+        snprintf(foot, sizeof(foot), "%s%s  SHIFT+OK:Opslaan  HOME:Terug",
+                 s_shift?"SHF ":"", s_alpha?"ABC":"   ");
+    display_str(2, LCD_HEIGHT-FOOTER_H+3, foot,
+                s_status[0] ? CYAN : YELLOW, RGB(25,25,40));
+}
+
+void text_editor_redraw(void) {
+    display_fill(C_BG);
+    draw_all();
+    draw_bars();
 }
 
 void text_editor_init(void) {
@@ -124,16 +134,18 @@ void text_editor_init(void) {
     s_shift=false; s_alpha=false; s_filename[0]=0; s_text[0]=0;
 }
 
-void text_editor_open(const char *name) {
+bool text_editor_open(const char *name) {
     uint32_t off, sz;
-    if (flashfs_open_read(name, &off, &sz) == 0 && sz <= MAX_B) {
-        flashfs_read(off, s_text, sz);
-        s_tlen = (int)sz; s_text[sz] = 0;
-    } else {
-        s_tlen=0; s_text[0]=0;
-    }
+    /* Refuse rather than open a truncated or empty copy: saving that
+     * under the same name would destroy the file. */
+    if (flashfs_open_read(name, &off, &sz) != 0 || sz > MAX_B) return false;
+    if (flashfs_read(off, s_text, sz) != (int)sz) return false;
+    s_tlen = (int)sz; s_text[sz] = 0;
     strncpy(s_filename, name, FFS_NAME_LEN-1);
+    s_filename[FFS_NAME_LEN-1] = 0;
     s_cpos=0; s_scroll=0; s_modified=false;
+    s_status = "";
+    return true;
 }
 
 static void save_file(void) {
@@ -141,8 +153,12 @@ static void save_file(void) {
         /* Prompt — for now use default name */
         strncpy(s_filename, "noname.txt", FFS_NAME_LEN-1);
     }
-    flashfs_write(s_filename, s_text, (uint32_t)s_tlen);
-    s_modified = false;
+    if (flashfs_write(s_filename, s_text, (uint32_t)s_tlen) == s_tlen) {
+        s_modified = false;
+        s_status = "Opgeslagen";
+    } else {
+        s_status = "Opslaan mislukt!";   /* keep the changes marked unsaved */
+    }
 }
 
 static void insert_char(char c) {
@@ -166,13 +182,14 @@ void text_editor_handle_event(const kernel_event_t *ev) {
     int cl = cursor_line();
 
     if (k==KEY_HOME||k==KEY_BACK) { kernel_set_app(APP_HOME); return; }
+    s_status = "";
     if (k==KEY_SHIFT) { s_shift=!s_shift; text_editor_redraw(); return; }
     if (k==KEY_ALPHA) { s_alpha=!s_alpha; text_editor_redraw(); return; }
 
-    if (k==KEY_EXE && s_shift) { save_file(); text_editor_redraw(); return; }
+    if (key_is_exe(k) && s_shift) { save_file(); s_shift = false; text_editor_redraw(); return; }
 
     if (k==KEY_BACKSPACE) { delete_char(); }
-    else if (k==KEY_EXE)  { insert_char('\n'); }
+    else if (key_is_exe(k)) { insert_char('\n'); }
     else if (k==KEY_LEFT  && s_cpos>0) s_cpos--;
     else if (k==KEY_RIGHT && s_cpos<s_tlen) s_cpos++;
     else if (k==KEY_UP) {
@@ -207,15 +224,5 @@ void text_editor_handle_event(const kernel_event_t *ev) {
     if (cl >= s_scroll + ROWS) s_scroll = cl - ROWS + 1;
 
     draw_all();
-    /* Redraw footer for modified indicator */
-    display_fill_rect(0, LCD_HEIGHT-FOOTER_H, LCD_WIDTH, FOOTER_H, RGB(25,25,40));
-    char hdr[48];
-    snprintf(hdr, sizeof(hdr), "Editor: %s%s",
-             s_filename[0]?s_filename:"[nieuw]", s_modified?" *":"");
-    display_fill_rect(0, 0, LCD_WIDTH, HEADER_H, C_HDR);
-    display_str(6, 6, hdr, WHITE, C_HDR);
-    char foot[48];
-    snprintf(foot, sizeof(foot), "%s%s  S+EXE:Save  HOME:Terug",
-             s_shift?"SHF ":"", s_alpha?"ABC":"   ");
-    display_str(2, LCD_HEIGHT-FOOTER_H+3, foot, YELLOW, RGB(25,25,40));
+    draw_bars();
 }

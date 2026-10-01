@@ -1,17 +1,10 @@
-
 /* ================================================================
  * NumWorks OS — Photo Viewer (Foto's)
  * File: apps/photo_viewer/photo_viewer.c
  *
- * Displays JPEG/PNG images from USB drive or internal FS.
- * Images are decoded to RGB565 and displayed on the 320×240 screen.
- * Decoding is done via a minimal JPEG/PNG decoder included below.
- *
- * For JPEG: uses a stripped-down 2-pass DCT decoder (< 12 KB code).
- * For PNG: uses the lodepng single-file library subset.
- *
- * In this reference implementation, images are loaded from the
- * USB mass-storage FAT32 volume mounted at /usb/.
+ * Shows uncompressed 24-bit BMP images (up to 320x216) from the USB
+ * mass-storage FAT volume, converted to RGB565 line by line.
+ * JPEG and PNG files are recognised but not decoded yet.
  * ================================================================ */
 #include "photo_viewer.h"
 #include "../../hal/display.h"
@@ -21,76 +14,81 @@
 #include "../../include/string.h"
 #include "../../include/stdio.h"
 
-/* Simplified USB file listing — real implementation via usb_host.h */
-extern int  usb_host_mounted(void);
-extern int  usb_host_ls(char names[][32], int maxn);
-extern int  usb_host_read_file(const char *name, uint8_t *buf, uint32_t maxlen, uint32_t *size);
+#include "../../usb/usb_host.h"
 
 #define C_BG   RGB(0,0,0)
 #define C_HDR  RGB(30,80,200)
 #define HEADER_H 24
 #define MAX_FILES 32
+#define IMG_MAX_W LCD_WIDTH
+#define IMG_MAX_H (LCD_HEIGHT - HEADER_H)
 
 static char  s_names[MAX_FILES][32];
 static int   s_nfiles = 0;
 static int   s_cursor = 0;
 static bool  s_viewing = false;
-/* No static image buffer — BMP pixels decoded line-by-line directly
- * into the framebuffer to keep RAM usage near zero.              */
-static uint8_t s_imgbuf[320*3];  /* one scan-line buffer: 960 bytes */
+/* Images are streamed one scan line at a time into this buffer and
+ * drawn straight into the framebuffer, so RAM use stays tiny. */
+static uint8_t s_imgbuf[IMG_MAX_W * 3];
 
-/* Minimal BMP decoder for 24-bit uncompressed BMP (fallback format) */
-static bool decode_bmp(const uint8_t *data, uint32_t size) {
-    if (size < 54) return false;
-    if (data[0]!='B' || data[1]!='M') return false;
-    uint32_t offset = *(uint32_t*)(data+10);
-    int32_t  w = *(int32_t*)(data+18);
-    int32_t  h = *(int32_t*)(data+22);
-    uint16_t bpp = *(uint16_t*)(data+28);
-    if (bpp != 24) return false;
-    if (w > LCD_WIDTH || h > LCD_HEIGHT) return false;
-    int row_stride = (w*3 + 3) & ~3;
-    for (int y=0; y<h; y++) {
-        const uint8_t *row = data + offset + (h-1-y)*row_stride;
-        for (int x=0; x<w; x++) {
-            uint8_t b=row[x*3], g=row[x*3+1], r=row[x*3+2];
-            uint16_t c = RGB(r,g,b);
-            display_pixel(x, HEADER_H+y, c);
-        }
-    }
-    return true;
+static uint16_t rd16(const uint8_t *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
+static uint32_t rd32(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-/* Very minimal JPEG header parser — just displays a placeholder */
-static bool decode_jpeg(const uint8_t *data, uint32_t size) {
-    (void)data; (void)size;
-    /* Real JPEG decode would use a lightweight libjpeg-turbo subset.
-     * For the reference build, display the file info. */
-    display_fill_rect(0, HEADER_H, LCD_WIDTH, LCD_HEIGHT-HEADER_H, RGB(20,20,20));
-    display_str(60, 110, "JPEG: decoder vereist", RGB(200,200,200), RGB(20,20,20));
-    display_str(60, 124, "Zet .bmp bestanden op USB", RGB(150,150,150), RGB(20,20,20));
-    return true;
+/* Uncompressed 24-bit BMP. Every size comes from the file, so each is
+ * checked before it is used; returns an error message or NULL. */
+static const char *show_bmp(const char *name) {
+    uint8_t hdr[54];
+    uint32_t got = 0;
+    if (usb_host_read_at(name, 0, hdr, sizeof(hdr), &got) < 0 || got < sizeof(hdr))
+        return "Bestand te kort";
+    uint32_t offset = rd32(hdr + 10);
+    uint32_t dib    = rd32(hdr + 14);
+    int32_t  w      = (int32_t)rd32(hdr + 18);
+    int32_t  h      = (int32_t)rd32(hdr + 22);
+    uint16_t bpp    = rd16(hdr + 28);
+    uint32_t comp   = rd32(hdr + 30);
+    if (dib < 40 || bpp != 24 || comp != 0) return "Alleen 24-bit BMP";
+    bool top_down = h < 0;                  /* negative height: rows top-down */
+    uint32_t rows = top_down ? (uint32_t)0 - (uint32_t)h : (uint32_t)h;
+    if (w <= 0 || w > IMG_MAX_W || rows == 0 || rows > IMG_MAX_H)
+        return "Max 320x216 pixels";
+    uint32_t row_bytes = (uint32_t)w * 3;
+    uint32_t stride    = (row_bytes + 3) & ~3U;
+    if (offset < sizeof(hdr) || offset > UINT32_MAX - rows * stride)
+        return "Ongeldige BMP";
+
+    for (uint32_t y = 0; y < rows; y++) {
+        uint32_t src = top_down ? y : rows - 1 - y;
+        if (usb_host_read_at(name, offset + src * stride, s_imgbuf, row_bytes, &got) < 0 ||
+            got < row_bytes)
+            return "Bestand afgekapt";
+        for (int32_t x = 0; x < w; x++) {
+            const uint8_t *px = s_imgbuf + x * 3;          /* B, G, R */
+            display_pixel((int16_t)x, (int16_t)(HEADER_H + y), RGB(px[2], px[1], px[0]));
+        }
+    }
+    return NULL;
 }
 
 static void load_and_show(void) {
-    uint8_t *buf = s_imgbuf;
-    uint32_t sz = 0;
-    if (usb_host_read_file(s_names[s_cursor], buf, sizeof(s_imgbuf), &sz) < 0) {
-        display_fill_rect(0, HEADER_H, LCD_WIDTH, LCD_HEIGHT-HEADER_H, C_BG);
+    const char *name = s_names[s_cursor];
+    uint8_t magic[4];
+    uint32_t got = 0;
+    display_fill_rect(0, HEADER_H, LCD_WIDTH, LCD_HEIGHT-HEADER_H, C_BG);
+    if (usb_host_read_at(name, 0, magic, sizeof(magic), &got) < 0 || got < 2) {
         display_str(40, 110, "Kan bestand niet lezen", RED, C_BG);
         return;
     }
     /* Detect format by magic bytes */
-    bool ok = false;
-    if (sz >= 2 && buf[0]=='B' && buf[1]=='M')
-        ok = decode_bmp(buf, sz);
-    else if (sz >= 2 && buf[0]==0xFF && buf[1]==0xD8)
-        ok = decode_jpeg(buf, sz);
-    else if (sz >= 4 && buf[0]==0x89 && buf[1]=='P') {
-        display_str(40,110,"PNG: extern decoder", RGB(200,200,200), C_BG);
-        ok = true;
-    }
-    if (!ok) display_str(40, 110, "Onbekend formaat", RED, C_BG);
+    const char *err;
+    if (magic[0]=='B' && magic[1]=='M')                 err = show_bmp(name);
+    else if (magic[0]==0xFF && magic[1]==0xD8)          err = "JPEG: nog geen decoder, gebruik .bmp";
+    else if (got >= 4 && magic[0]==0x89 && magic[1]=='P') err = "PNG: nog geen decoder, gebruik .bmp";
+    else                                                err = "Onbekend formaat";
+    if (err) display_str(20, 110, err, RED, C_BG);
 }
 
 static void draw_file_list(void) {
@@ -142,6 +140,6 @@ void photo_viewer_handle_event(const kernel_event_t *ev) {
     if (!s_viewing) {
         if (k==KEY_UP && s_cursor>0) { s_cursor--; draw_file_list(); }
         else if (k==KEY_DOWN && s_cursor<s_nfiles-1) { s_cursor++; draw_file_list(); }
-        else if (k==KEY_EXE && s_nfiles>0) { s_viewing=true; photo_viewer_redraw(); }
+        else if (key_is_exe(k) && s_nfiles>0) { s_viewing=true; photo_viewer_redraw(); }
     }
 }

@@ -9,10 +9,13 @@
  *  - Mounts FAT32 partition via Chan FatFs
  *  - Provides ls / read_file / import operations
  *
- * Hardware note (N0120):
- *  The N0120 does not power VBUS from the calculator side.
- *  VBUS_EN is on PB2. Set PB2 high to enable 5V if available.
- *  For development, use a self-powered USB OTG adapter.
+ * Hardware note:
+ *  Nothing on the board can supply 5 V on VBUS: the power path is the
+ *  RT9526A linear charger (VBUS in, battery out) and the USBLC6-2 is
+ *  passive ESD protection. Bus-powered drives therefore can't work; a
+ *  self-powered drive needs a role-swap the USB-C port may not offer.
+ *  The OTG_FS core is also used in device mode by usb_cdc.c, so host
+ *  mode is only started on request, never at boot.
  *
  * This file implements the state machine and HAL register access.
  * ================================================================ */
@@ -32,6 +35,26 @@
 #define OTG_GINTMSK   (*(volatile uint32_t*)(OTG_FS_BASE + 0x018))
 #define OTG_HCFG      (*(volatile uint32_t*)(OTG_FS_BASE + 0x400))
 #define OTG_HPRT      (*(volatile uint32_t*)(OTG_FS_BASE + 0x440))
+#define OTG_GUSBCFG_FHMOD (1U<<29)
+#define OTG_GUSBCFG_FDMOD (1U<<30)
+
+/* HPRT bits that are cleared by writing 1 (PENA disables the port!).
+ * Every read-modify-write of HPRT must mask them out. */
+#define HPRT_PCSTS    (1U<<0)   /* device connected (read-only) */
+#define HPRT_PCDET    (1U<<1)
+#define HPRT_PENA     (1U<<2)
+#define HPRT_PENCHNG  (1U<<3)
+#define HPRT_POCCHNG  (1U<<5)
+#define HPRT_W1C_MASK (HPRT_PCDET | HPRT_PENA | HPRT_PENCHNG | HPRT_POCCHNG)
+#define HPRT_PRST     (1U<<8)
+#define HPRT_PPWR     (1U<<12)
+
+static void hprt_set(uint32_t bits) {
+    OTG_HPRT = (OTG_HPRT & ~HPRT_W1C_MASK) | bits;
+}
+static void hprt_clear(uint32_t bits) {
+    OTG_HPRT = OTG_HPRT & ~(HPRT_W1C_MASK | bits);
+}
 
 typedef enum {
     HOST_STATE_IDLE,
@@ -51,15 +74,6 @@ static FATFS        s_fatfs;
 extern DRESULT  usb_msc_disk_read(BYTE *buf, LBA_t sector, UINT count);
 extern DRESULT  usb_msc_disk_write(const BYTE *buf, LBA_t sector, UINT count);
 
-/* ── VBUS enable ─────────────────────────────────────────────── */
-static void vbus_enable(void) {
-    /* PB2 = VBUS_EN on N0120, active high */
-    RCC->AHB1ENR |= (1U << 1);   /* GPIOBEN */
-    volatile uint32_t *GPIOB_MODER = (volatile uint32_t *)0x40020400UL;
-    *GPIOB_MODER = (*GPIOB_MODER & ~(3U<<4)) | (1U<<4);   /* PB2 output */
-    *(volatile uint32_t *)0x40020418UL |= (1U<<2);          /* ODR set PB2 */
-}
-
 /* ── OTG_FS clock & GPIO init ────────────────────────────────── */
 static void otg_gpio_init(void) {
     /* Enable OTG_FS clock */
@@ -73,16 +87,19 @@ static void otg_gpio_init(void) {
 }
 
 int usb_host_init(void) {
-    s_state   = HOST_STATE_WAIT_CONNECT;
+    s_state   = HOST_STATE_IDLE;
     s_mounted = false;
-    vbus_enable();
+    /* The core can't be host and device at once: leave it alone while
+     * usb_cdc.c has it in forced device mode. */
+    if (OTG_GUSBCFG & OTG_GUSBCFG_FDMOD) return -1;
     otg_gpio_init();
     /* Configure OTG FS as host */
-    OTG_GUSBCFG |= (1U<<29);   /* FHMOD: force host */
+    OTG_GUSBCFG |= OTG_GUSBCFG_FHMOD;
     for (volatile int i=0; i<50000; i++) {}
     OTG_HCFG = 1;               /* FS PHY clock 48 MHz */
     /* Enable port power */
-    OTG_HPRT |= (1U<<12);
+    hprt_set(HPRT_PPWR);
+    s_state = HOST_STATE_WAIT_CONNECT;
     return 0;
 }
 
@@ -95,15 +112,15 @@ void usb_host_process(void) {
     switch (s_state) {
         case HOST_STATE_WAIT_CONNECT:
             /* Check port connect */
-            if (OTG_HPRT & (1U<<1)) {   /* PCDET */
+            if (OTG_HPRT & HPRT_PCSTS) {
                 s_state = HOST_STATE_RESET;
             }
             break;
         case HOST_STATE_RESET:
             /* Issue port reset */
-            OTG_HPRT |= (1U<<8);
+            hprt_set(HPRT_PRST);
             for (volatile int i=0; i<200000; i++) {}
-            OTG_HPRT &= ~(1U<<8);
+            hprt_clear(HPRT_PRST);
             s_state = HOST_STATE_ENUMERATE;
             break;
         case HOST_STATE_ENUMERATE:
@@ -122,7 +139,7 @@ void usb_host_process(void) {
         }
         case HOST_STATE_READY:
             /* Check for disconnect */
-            if (!(OTG_HPRT & (1U<<1))) {
+            if (!(OTG_HPRT & HPRT_PCSTS)) {
                 s_mounted = false;
                 f_unmount("1:");
                 s_state = HOST_STATE_WAIT_CONNECT;
@@ -168,6 +185,22 @@ int usb_host_read_file(const char *name, uint8_t *buf,
     f_close(&fp);
     if (fr != FR_OK) return -1;
     *size_out = br;
+    return 0;
+}
+
+int usb_host_read_at(const char *name, uint32_t offset, uint8_t *buf,
+                     uint32_t len, uint32_t *got) {
+    if (!s_mounted) return -1;
+    char path[48];
+    snprintf(path, sizeof(path), "1:/%s", name);
+    FIL  fp;
+    UINT br = 0;
+    if (f_open(&fp, path, FA_READ) != FR_OK) return -1;
+    FRESULT fr = f_lseek(&fp, offset);
+    if (fr == FR_OK) fr = f_read(&fp, buf, len, &br);
+    f_close(&fp);
+    if (fr != FR_OK) return -1;
+    *got = br;
     return 0;
 }
 

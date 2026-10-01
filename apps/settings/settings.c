@@ -124,7 +124,7 @@ void settings_handle_event(const kernel_event_t *ev) {
             led_set((lamp_state_t)l);
             draw_row(0);
         }
-    } else if (s_cursor == 3 && k == KEY_EXE) {
+    } else if (s_cursor == 3 && key_is_exe(k)) {
         /* Reboot */
         volatile uint32_t *aircr = (volatile uint32_t *)0xE000ED0CUL;
         *aircr = (0x5FAUL << 16) | (1U << 2);

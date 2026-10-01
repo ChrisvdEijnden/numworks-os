@@ -13,7 +13,7 @@
  *   │   notes.txt        2.0 KB                │
  *   │   ...                                    │
  *   ├──────────────────────────────────────────┤
- *   │ [EXE]Open [SHIFT]Del [ALPHA]Rename [+]Copy│  ← hint bar
+ *   │ OK:Open  SHIFT:Del (twice)  HOME:Back    │  ← hint bar
  *   └──────────────────────────────────────────┘
  *
  * Code size target: < 5 KB
@@ -24,6 +24,7 @@
 #include "../fs/flashfs.h"
 #include "../kernel/kernel.h"
 #include "../shell/shell.h"
+#include "../apps/text_editor/text_editor.h"
 #include "../include/string.h"
 #include "../include/stdio.h"
 
@@ -43,12 +44,15 @@ static fm_item_t s_items[FFS_MAX_FILES];
 static int       s_nitem  = 0;
 static int       s_cursor = 0;
 static int       s_scroll = 0;
+static bool      s_del_armed = false;   /* SHIFT pressed once: confirm delete */
+static const char *s_msg = "";          /* one-shot footer message */
 
 /* ── Load file list ──────────────────────────────────────────── */
 static void list_cb(const ffs_entry_t *e, void *ctx) {
     int *n = (int *)ctx;
     if (*n < FFS_MAX_FILES) {
         strncpy(s_items[*n].name, e->name, FFS_NAME_LEN-1);
+        s_items[*n].name[FFS_NAME_LEN-1] = 0;
         s_items[*n].size = e->size;
         (*n)++;
     }
@@ -57,6 +61,10 @@ static void list_cb(const ffs_entry_t *e, void *ctx) {
 static void fm_load(void) {
     s_nitem = 0;
     flashfs_ls(list_cb, &s_nitem);
+    /* The list may have shrunk: keep the cursor on a real entry */
+    if (s_cursor >= s_nitem) s_cursor = s_nitem > 0 ? s_nitem - 1 : 0;
+    if (s_scroll > s_cursor) s_scroll = s_cursor;
+    if (s_cursor >= s_scroll + FM_VISIBLE_ROWS) s_scroll = s_cursor - FM_VISIBLE_ROWS + 1;
 }
 
 /* ── Drawing ─────────────────────────────────────────────────── */
@@ -87,9 +95,16 @@ static void draw_header(void) {
 
 static void draw_footer(void) {
     display_fill_rect(0, FOOTER_Y, LCD_WIDTH, FOOTER_H, DKGREY);
-    display_str(2, FOOTER_Y+3,
-        "EXE:Open  SHIFT:Del  ALPHA:Ren  BACK:Quit",
-        YELLOW, DKGREY);
+    if (s_del_armed && s_nitem > 0) {
+        char line[48];
+        snprintf(line, sizeof(line), "Wis %s? SHIFT=ja", s_items[s_cursor].name);
+        display_str(2, FOOTER_Y+3, line, RED, DKGREY);
+    } else if (s_msg[0]) {
+        display_str(2, FOOTER_Y+3, s_msg, CYAN, DKGREY);
+    } else {
+        display_str(2, FOOTER_Y+3, "OK:Bewerk  SHIFT:Wis  HOME:Terug",
+                    YELLOW, DKGREY);
+    }
 }
 
 void fm_redraw(void) {
@@ -105,28 +120,17 @@ void fm_redraw(void) {
 /* ── Input ───────────────────────────────────────────────────── */
 static void fm_delete(void) {
     if (s_nitem == 0) return;
-    flashfs_delete(s_items[s_cursor].name);
+    if (flashfs_delete(s_items[s_cursor].name) < 0) s_msg = "Wissen mislukt";
     fm_redraw();
 }
 
 static void fm_open(void) {
     if (s_nitem == 0) return;
-    /* If .py, run it in shell */
-    const char *name = s_items[s_cursor].name;
-    int nlen = (int)strlen(name);
-    kernel_set_app(APP_SHELL);
-    if (nlen > 3 && strcmp(name + nlen - 3, ".py") == 0) {
-        char cmd[FFS_NAME_LEN + 6];
-        snprintf(cmd, sizeof(cmd), "run %s", name);
-        shell_print("> %s\n", cmd);
-        /* Delegate to command runner */
-        extern void cmd_run(const char *);
-        cmd_run(cmd);
+    if (text_editor_open(s_items[s_cursor].name)) {
+        kernel_set_app(APP_TEXT_EDITOR);
     } else {
-        char cmd[FFS_NAME_LEN + 6];
-        snprintf(cmd, sizeof(cmd), "cat %s", name);
-        extern void cmd_run(const char *);
-        cmd_run(cmd);
+        s_msg = "Te groot voor de editor (max 4 KB)";
+        draw_footer();
     }
 }
 
@@ -134,6 +138,14 @@ void fm_handle_event(const kernel_event_t *ev) {
     if (ev->action != 0) return;
     key_code_t k = (key_code_t)ev->key;
     bool redraw = false;
+
+    s_msg = "";
+    /* Deleting takes SHIFT twice; any other key cancels */
+    if (s_del_armed) {
+        s_del_armed = false;
+        if (k == KEY_SHIFT) { fm_delete(); return; }
+        draw_footer();
+    }
 
     if (k == KEY_DOWN) {
         if (s_cursor < s_nitem - 1) {
@@ -147,14 +159,14 @@ void fm_handle_event(const kernel_event_t *ev) {
             if (s_cursor < s_scroll) s_scroll--;
             redraw = true;
         }
-    } else if (k == KEY_EXE) {
+    } else if (key_is_exe(k)) {
         fm_open();
         return;
     } else if (k == KEY_SHIFT) {
-        fm_delete();
+        if (s_nitem > 0) { s_del_armed = true; draw_footer(); }
         return;
     } else if (k == KEY_BACK || k == KEY_HOME) {
-        kernel_set_app(APP_SHELL);
+        kernel_set_app(APP_HOME);
         return;
     }
 
@@ -163,6 +175,7 @@ void fm_handle_event(const kernel_event_t *ev) {
         for (int r = 0; r < FM_VISIBLE_ROWS; r++) {
             draw_row(r, s_scroll + r, (s_scroll + r) == s_cursor);
         }
+        draw_footer();
     }
 }
 

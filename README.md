@@ -6,7 +6,7 @@ A fully custom firmware for the **NumWorks N0120** calculator, built on top of t
 
 | App | Dutch Name | Description |
 |-----|-----------|-------------|
-| **Rekenmachine** | Calculator | Scientific calculator with MicroPython eval |
+| **Rekenmachine** | Calculator | Scientific calculator (native evaluator, no Python needed) |
 | **Functies** | Functions | Graph plotter, table view, zoom/pan |
 | **Vergelijkingen** | Equations | Quadratic, linear systems, single equation |
 | **Python** | Python REPL | Interactive MicroPython REPL |
@@ -16,11 +16,12 @@ A fully custom firmware for the **NumWorks N0120** calculator, built on top of t
 | **Docs** | Docs | Built-in reference documentation |
 | **Instellingen** | Settings | LED lamp (rood/wit/uit), version info, reboot |
 | **Foto's** | Photo Viewer | View .bmp/.jpg/.png from USB drive |
-| Text Editor | Text Editor | Open, edit, save .txt/.py files |
+| **Editor** | Text Editor | Open (from Bestanden), edit, save .txt/.py files |
 
 ## Homepage
 
-3×4 icon grid with colour indicators. Navigate with arrow keys, press EXE to open.
+3×4 icon grid with colour indicators. Navigate with arrow keys, press OK (or EXE) to open.
+In the math apps, SHIFT 9 / SHIFT 0 type `(` / `)` and SHIFT gives the inverse functions.
 
 ```
 ┌──────────────┬──────────────┬──────────────┐
@@ -30,7 +31,7 @@ A fully custom firmware for the **NumWorks N0120** calculator, built on top of t
 ├──────────────┼──────────────┼──────────────┤
 │   Tetris     │    Docs      │ Instellingen │
 ├──────────────┼──────────────┼──────────────┤
-│   Foto's     │              │              │
+│   Foto's     │   Editor     │              │
 └──────────────┴──────────────┴──────────────┘
 ```
 

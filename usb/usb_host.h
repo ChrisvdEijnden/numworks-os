@@ -19,6 +19,9 @@ void usb_host_process(void);        /* Call periodically */
 int  usb_host_ls(char names[][32], int maxn);
 int  usb_host_read_file(const char *name, uint8_t *buf,
                         uint32_t maxlen, uint32_t *size_out);
+/* Read up to len bytes at `offset`; *got may be short at end of file */
+int  usb_host_read_at(const char *name, uint32_t offset, uint8_t *buf,
+                      uint32_t len, uint32_t *got);
 
 /* Import a file into internal flash FS */
 int  usb_host_import(const char *usb_name, const char *dest_name);
