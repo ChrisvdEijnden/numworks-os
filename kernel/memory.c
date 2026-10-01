@@ -28,6 +28,12 @@ static void bitmap_set(uint16_t idx) { s_bitmap[idx>>5] |=  (1U<<(idx&31)); }
 static void bitmap_clr(uint16_t idx) { s_bitmap[idx>>5] &= ~(1U<<(idx&31)); }
 static bool bitmap_get(uint16_t idx) { return !!(s_bitmap[idx>>5] & (1U<<(idx&31))); }
 
+/* Never hand out blocks past the end of the RAM the linker left us */
+static uint16_t num_blocks(void) {
+    uint32_t avail = (uint32_t)(_eheap - _sheap) / BLOCK_SIZE;
+    return (uint16_t)(avail < NUM_BLOCKS ? avail : NUM_BLOCKS);
+}
+
 void mem_init(void) {
     memset(s_bitmap, 0, sizeof(s_bitmap));
 }
@@ -39,7 +45,8 @@ void *mem_alloc(size_t bytes) {
     uint16_t run  = 0;
     uint16_t start = 0;
 
-    for (uint16_t i = 0; i < NUM_BLOCKS; i++) {
+    uint16_t n = num_blocks();
+    for (uint16_t i = 0; i < n; i++) {
         if (!bitmap_get(i)) {
             if (!run) start = i;
             if (++run == need) {
@@ -67,7 +74,8 @@ void mem_free(void *ptr) {
 
 void mem_stats(uint32_t *used, uint32_t *free_bytes) {
     uint32_t u = 0;
-    for (uint16_t i = 0; i < NUM_BLOCKS; i++) if (bitmap_get(i)) u++;
+    uint16_t n = num_blocks();
+    for (uint16_t i = 0; i < n; i++) if (bitmap_get(i)) u++;
     if (used)       *used       = u * BLOCK_SIZE;
-    if (free_bytes) *free_bytes = (NUM_BLOCKS - u) * BLOCK_SIZE;
+    if (free_bytes) *free_bytes = (n - u) * BLOCK_SIZE;
 }

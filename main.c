@@ -38,15 +38,22 @@ static void boot_splash(uint32_t ms_start) {
 
     /* Progress bar */
     display_rect(20, 110, 280, 14, RGB(60,60,80));
+    display_flush();
     uint32_t elapsed;
+    int shown = -1;
     do {
         elapsed = hal_tick_ms() - ms_start;
         int pct = (int)(elapsed * 280 / 1500);
         if (pct > 280) pct = 280;
-        display_fill_rect(21, 111, pct, 12, RGB(60,130,255));
+        if (pct != shown) {
+            display_fill_rect(21, 111, pct, 12, RGB(60,130,255));
+            display_flush();
+            shown = pct;
+        }
     } while (elapsed < 1500);
 
     display_str(10, 140, "Klaar!", RGB(100,255,100), RGB(10,10,20));
+    display_flush();
     hal_delay_ms(300);
 }
 
@@ -85,12 +92,22 @@ int main(void) {
     /* 2. Kernel + memory */
     kernel_init();
 
-    /* 3. Flash FS */
-    if (flashfs_init() != 0) {
+    /* 3. Flash FS. When it has to compact, it borrows the framebuffer as
+     *    scratch space and the current app is redrawn afterwards. */
+    flashfs_set_scratch(g_framebuf, sizeof(g_framebuf), kernel_request_redraw);
+    int fs = flashfs_init();
+    if (fs == FFS_ERR_FORMAT) {
         display_fill(RGB(20,0,0));
-        display_str(10, 20, "FS init mislukt — formatteren...", RED, RGB(20,0,0));
+        display_str(10, 20, "FS ongeldig - formatteren...", RED, RGB(20,0,0));
+        display_flush();
         hal_delay_ms(800);
         flashfs_format();
+    } else if (fs == FFS_ERR_NODEV) {
+        display_fill(RGB(20,0,0));
+        display_str(10, 20, "Geen flash-opslag gevonden.", RED, RGB(20,0,0));
+        display_str(10, 32, "Bestanden worden niet bewaard.", RED, RGB(20,0,0));
+        display_flush();
+        hal_delay_ms(1500);
     }
 
     /* 4. USB CDC (virtual serial for PC transfer) */

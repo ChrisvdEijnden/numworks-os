@@ -153,7 +153,18 @@ ifneq ($(wildcard $(MP_LIB)),)
     LDFLAGS += $(MP_LIB)
 endif
 
-.PHONY: all clean flash dfu size dump mp phi delta openocd help
+.PHONY: all clean flash dfu size dump mp phi delta openocd help restore print-libs print-newlib
+
+# Refuse to flash the image at an address it isn't linked for: it would
+# not run there (the vector table and every absolute address would be wrong).
+define check_link_addr
+	@vma=$$($(OBJDUMP) -h $(BUILD)/$(TARGET).elf | awk '$$2 == ".isr_vector" { print "0x" $$4 }'); \
+	if [ -z "$$vma" ] || [ "$$(($$vma))" -ne "$$(($(1)))" ]; then \
+	  echo "error: $(TARGET) is linked for $${vma:-an unknown address}, not $(1);"; \
+	  echo "       it would not run there. Change LDSCRIPT before flashing to $(1)."; \
+	  exit 1; \
+	fi
+endef
 
 all: $(BUILD)/$(TARGET).bin size
 
@@ -190,24 +201,35 @@ mp:
 # Via Phi bootloader (recommended for N0120)
 # Connect USB-C, hold RESET, then run:
 phi: $(BUILD)/$(TARGET).bin
+	$(call check_link_addr,0x08040000)
 	@echo "Flashing via Phi bootloader at 0x08040000 ..."
 	dfu-util -d 0483:df11 -a 0 -s 0x08040000:leave -D $(BUILD)/$(TARGET).bin
 
 # Via Delta bootloader
 delta: $(BUILD)/$(TARGET).bin
+	$(call check_link_addr,0x08010000)
 	@echo "Flashing via Delta bootloader at 0x08010000 ..."
 	dfu-util -d 0483:df11 -a 0 -s 0x08010000:leave -D $(BUILD)/$(TARGET).bin
 
 # Via OpenOCD + ST-Link (development — bypasses signature check)
 openocd: $(BUILD)/$(TARGET).bin
+	$(call check_link_addr,0x08040000)
 	openocd -f interface/stlink.cfg -f target/stm32f7x.cfg \
 	    -c "init; reset halt" \
 	    -c "flash write_image erase $(BUILD)/$(TARGET).bin 0x08040000" \
 	    -c "verify_image $(BUILD)/$(TARGET).bin 0x08040000" \
 	    -c "reset run; exit"
 
-# Alias
+# Writes over the stock firmware at the start of the external flash.
 flash: $(BUILD)/$(TARGET).bin
+	$(call check_link_addr,0x90000000)
+	@if [ "$(CONFIRM)" != "overwrite-stock-firmware" ]; then \
+	  echo "This overwrites the stock NumWorks firmware at 0x90000000, and"; \
+	  echo "epsilon-qspi-backup.bin can NOT bring it back (see docs/BUILD.md,"; \
+	  echo "'Restore Official Firmware')."; \
+	  echo "To go ahead anyway: make flash CONFIRM=overwrite-stock-firmware"; \
+	  exit 1; \
+	fi
 	@echo "Flashing to N0120 QSPI via rescue mode..."
 	@echo "Calculator must show numworks.com/rescue screen."
 	dfu-util -d 0483:a291 -a 0 -s 0x90000000:leave -D $(BUILD)/$(TARGET).bin
@@ -226,6 +248,7 @@ help:
 	@echo "  phi      - Flash via Phi bootloader (N0120)"
 	@echo "  delta    - Flash via Delta bootloader"
 	@echo "  openocd  - Flash via ST-Link (dev)"
+	@echo "  flash    - Overwrite stock firmware in QSPI (needs CONFIRM=...)"
 	@echo "  mp       - Build MicroPython static library"
 	@echo "  size     - Show firmware size"
 	@echo "  clean    - Clean build artefacts"
@@ -257,5 +280,12 @@ print-newlib:
 	@echo "Searching for stdint.h ..."
 	@find /usr/local /opt/homebrew -name stdint.h 2>/dev/null | grep -i "arm-none-eabi\|newlib" | head -8 || echo "  (none found)"
 
+# epsilon-qspi-backup.bin was taken after an old build of this OS had
+# already been flashed over the start of the stock firmware, so it can't
+# restore a bootable calculator. Refuse rather than flash it.
 restore:
-	dfu-util -d 0483:a291 -a 0 -s 0x90000000:leave -D epsilon-qspi-backup.bin
+	@echo "Refusing: epsilon-qspi-backup.bin is not a working stock image."
+	@echo "Its first 108 KB (0x0-0x1AFFF) is an old build of this OS, not the"
+	@echo "Epsilon kernel, so flashing it would leave the calculator unbootable."
+	@echo "Restore the official firmware as described in docs/BUILD.md."
+	@exit 1

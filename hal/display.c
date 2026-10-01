@@ -19,6 +19,9 @@
 /* Framebuffer — 320*240*2 = 153,600 bytes in .bss */
 uint16_t g_framebuf[LCD_WIDTH * LCD_HEIGHT] __attribute__((section(".framebuf")));
 
+/* Set by every drawing primitive, cleared by display_flush() */
+static bool s_dirty = false;
+
 /* FSMC bank 1 addresses for NumWorks LCD: A16 is the RS (D/C) pin */
 #define LCD_CMD  (*(volatile uint16_t *)0x60000000UL)
 #define LCD_DATA (*(volatile uint16_t *)0x60020000UL)
@@ -63,6 +66,11 @@ void display_flush(void) {
     const uint16_t *p   = g_framebuf;
     const uint16_t *end = g_framebuf + LCD_WIDTH * LCD_HEIGHT;
     while (p < end) { LCD_DATA = *p++; }
+    s_dirty = false;
+}
+
+void display_update(void) {
+    if (s_dirty) display_flush();
 }
 
 /* ── Drawing primitives ──────────────────────────────────────── */
@@ -70,11 +78,14 @@ void display_fill(uint16_t c) {
     uint32_t n = LCD_WIDTH * LCD_HEIGHT;
     uint16_t *p = g_framebuf;
     while (n--) *p++ = c;
+    s_dirty = true;
 }
 
 void display_pixel(int16_t x, int16_t y, uint16_t c) {
-    if ((unsigned)x < LCD_WIDTH && (unsigned)y < LCD_HEIGHT)
+    if ((unsigned)x < LCD_WIDTH && (unsigned)y < LCD_HEIGHT) {
         FB_PIX(x,y) = c;
+        s_dirty = true;
+    }
 }
 
 void display_hline(int16_t x, int16_t y, int16_t w, uint16_t c) {

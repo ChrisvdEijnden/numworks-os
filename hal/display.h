@@ -17,7 +17,8 @@
 #define CYAN    RGB(0,200,220)
 
 void display_init(void);
-void display_flush(void);
+void display_flush(void);   /* push the whole framebuffer to the LCD now */
+void display_update(void);  /* push it only if something was drawn since */
 void display_splash(void);
 
 /* Drawing primitives */

@@ -64,10 +64,20 @@ make openocd
 
 ## Restore Official Firmware
 
-```bash
-# Download epsilon.bin from https://my.numworks.com/devices/upgrade
-dfu-util -d 0483:df11 -a 0 -s 0x08000000:leave -D epsilon.bin
-```
+Don't use `make restore` or `epsilon-qspi-backup.bin`. The first 108 KB
+of that dump (0x0–0x1AFFF) is an old build of this OS, not the Epsilon
+kernel, so it can't boot. Don't write `epsilon.bin` to `0x08000000`
+either: that is internal flash, where NumWorks' bootloader lives;
+Epsilon itself lives in the external flash.
+
+Use NumWorks' own recovery instead, which reinstalls a complete, signed
+firmware:
+
+1. Put the calculator in rescue mode (hold 6, press RESET). The screen
+   shows `numworks.com/rescue`.
+2. Open that address in a desktop browser with the calculator connected
+   over USB, and follow the instructions there. If the calculator still
+   boots, updating from https://my.numworks.com/devices/upgrade works too.
 
 ## USB Drive Notes
 

@@ -25,6 +25,7 @@
 #include "../include/string.h"
 
 static kernel_t  g_kernel;
+static volatile bool s_redraw_pending = false;
 extern volatile uint32_t g_tick_ms;
 
 void SysTick_Handler(void) {
@@ -71,7 +72,7 @@ void task_input(void) {
 }
 
 void task_display(void) {
-    display_flush();
+    display_update();
     scheduler_yield();
 }
 
@@ -95,6 +96,10 @@ void task_shell(void) {
             default: break;
         }
     }
+    if (s_redraw_pending) {
+        s_redraw_pending = false;
+        kernel_set_app(g_kernel.app_state);
+    }
     usb_cdc_process();
     scheduler_yield();
 }
@@ -117,6 +122,10 @@ bool kernel_event_get(kernel_event_t *out) {
     *out = s_evq[s_evq_head];
     s_evq_head = (s_evq_head + 1) % EVT_QUEUE_SIZE;
     return true;
+}
+
+void kernel_request_redraw(void) {
+    s_redraw_pending = true;
 }
 
 app_state_t kernel_get_app(void) {

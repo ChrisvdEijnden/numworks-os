@@ -1,34 +1,39 @@
 /* ================================================================
- * NumWorks OS — Linker Script for N0120 (QSPI boot)
+ * NumWorks OS — Linker Script (QSPI execute-in-place build)
  *
- * Target: STM32F730V8T6 in rescue mode
- * Code runs from QSPI XIP at 0x90000000 (8MB external flash)
- * Internal flash is locked — we don't touch it.
+ * Target: STM32F730V8T6, code runs from QSPI XIP at 0x90000000
+ * Internal flash is left to the bootloader — we don't link into it.
  *
- * Memory layout:
- *   QSPI  0x90000000  8MB   code + rodata (XIP)
- *   RAM   0x20000000  240K  framebuffer + data + bss
- *   DTCM  0x20040000  64K   mp_heap + stack
- *
- * RAM layout:
- *   0x20000000  .framebuf   153,600 B  (320*240*2)
- *   0x20025800  .data       ~3 KB
- *   0x20026600  .bss        ~22 KB
- *   0x2002B800  free        ~83 KB
+ * STM32F730 RAM is 256 KB in total, contiguous from 0x20000000:
+ *   DTCM   0x20000000   64 KB
+ *   SRAM1  0x20010000  176 KB
+ *   SRAM2  0x2003C000   16 KB
+ * There is no RAM at or above 0x20040000.
  *
  * DTCM layout:
- *   0x20040000  .mp_heap    48 KB
- *   0x2004C000  .stack      16 KB (grows down from 0x2004FFFC)
+ *   0x20000000  .stack      16 KB (grows down from 0x20004000)
+ *   0x20004000  .mp_heap    48 KB
+ *   The stack sits at the bottom of DTCM so an overflow runs into
+ *   unmapped memory below 0x20000000 and faults, instead of silently
+ *   corrupting the MicroPython heap.
+ *
+ * SRAM1+SRAM2 layout:
+ *   0x20010000  .framebuf   153,600 B  (320*240*2)
+ *   then        .data, .bss
+ *   then        newlib _sbrk heap up to 0x20040000
  * ================================================================ */
 
 MEMORY
 {
   QSPI  (rx)  : ORIGIN = 0x90000000, LENGTH = 8M
-  RAM   (rwx) : ORIGIN = 0x20000000, LENGTH = 240K
-  DTCM  (rwx) : ORIGIN = 0x20040000, LENGTH = 64K
+  DTCM  (rwx) : ORIGIN = 0x20000000, LENGTH = 64K
+  RAM   (rwx) : ORIGIN = 0x20010000, LENGTH = 192K
 }
 
 ENTRY(Reset_Handler)
+
+_stack_size   = 16K;
+_mp_heap_size = 48K;
 
 SECTIONS
 {
@@ -50,51 +55,60 @@ SECTIONS
   .ARM.extab : { *(.ARM.extab*) } >QSPI
   .ARM.exidx : { *(.ARM.exidx*) } >QSPI
 
-  /* ── RAM: framebuffer pinned at base ─────────────────────────── */
-  .framebuf (NOLOAD) :
+  /* ── DTCM: stack (grows down to 0x20000000) ──────────────────── */
+  .stack (NOLOAD) :
   {
-    _s_framebuf = .;
-    *(.framebuf*)
-    . = _s_framebuf + 153600;
-    _e_framebuf = .;
-  } >RAM
-
-  /* ── RAM: initialised data (copied from QSPI at startup) ──────── */
-  _sidata = LOADADDR(.data);
-  .data :
-  {
-    _sdata = .;
-    *(.data*)
-    _edata = .;
-  } >RAM AT>QSPI
-
-  /* ── RAM: zero-init ──────────────────────────────────────────── */
-  .bss (NOLOAD) :
-  {
-    _sbss = .;
-    *(.bss* COMMON)
-    _ebss = .;
-  } >RAM
+    _sstack = .;
+    . = . + _stack_size;
+    . = ALIGN(8);
+    _estack = .;            /* initial SP — AAPCS needs 8-byte alignment */
+  } >DTCM
 
   /* ── DTCM: MicroPython heap ──────────────────────────────────── */
   .mp_heap (NOLOAD) :
   {
     _smp_heap = .;
-    . = _smp_heap + 48K;
+    KEEP(*(.mp_heap*))
+    . = MAX(., _smp_heap + _mp_heap_size);
     _emp_heap = .;
   } >DTCM
 
-  /* ── DTCM: stack (grows down from top) ───────────────────────── */
-  .stack (NOLOAD) :
+  /* ── RAM: framebuffer pinned at base ─────────────────────────── */
+  .framebuf (NOLOAD) :
   {
-    _sstack = .;
-    . = ORIGIN(DTCM) + LENGTH(DTCM) - 4;
-    _estack = .;
-  } >DTCM
+    _s_framebuf = .;
+    *(.framebuf*)
+    . = MAX(., _s_framebuf + 153600);
+    _e_framebuf = .;
+  } >RAM
+
+  /* ── RAM: initialised data (copied from QSPI at startup) ──────── */
+  .data :
+  {
+    . = ALIGN(4);
+    _sdata = .;
+    *(.data*)
+    . = ALIGN(4);
+    _edata = .;
+  } >RAM AT>QSPI
+  _sidata = LOADADDR(.data);
+
+  /* ── RAM: zero-init ──────────────────────────────────────────── */
+  .bss (NOLOAD) :
+  {
+    . = ALIGN(4);
+    _sbss = .;
+    *(.bss* COMMON)
+    . = ALIGN(4);
+    _ebss = .;
+  } >RAM
 
   /* newlib _sbrk uses leftover RAM */
-  _sheap = _ebss;
+  _sheap = ALIGN(_ebss, 8);
   _eheap = ORIGIN(RAM) + LENGTH(RAM);
+
+  ASSERT(_estack - _sstack >= 8K, "stack is smaller than 8 KB")
+  ASSERT(_eheap - _sheap >= 4K, "less than 4 KB left for the newlib heap")
 
   /DISCARD/ : { *(.eh_frame) *(.note*) }
 }

@@ -47,39 +47,74 @@ void boot_main(void) {
 
 /* ================================================================
  * PLL setup: HSE 8 MHz → VCO 432 MHz → SYSCLK 216 MHz
- * APB1 = /4 = 54 MHz, APB2 = /2 = 108 MHz
+ * APB1 = /4 = 54 MHz, APB2 = /2 = 108 MHz, PLLQ = 48 MHz for USB
+ *
+ * We are normally started by a bootloader that may already be running
+ * from its own PLL. The PLL can only be reconfigured while it is off,
+ * so drop back to HSI first. 216 MHz is above the 180 MHz limit of
+ * normal mode, so over-drive is enabled using the sequence from the
+ * reference manual (RM0431, "Entering Over-drive mode").
  * ================================================================ */
+#define HSE_STARTUP_SPINS 500000U
+
 static void clocks_init(void) {
-    /* Flash: 7 wait states for 216 MHz, enable ART + prefetch */
+    /* Flash: 7 wait states for 216 MHz, enable ART + prefetch.
+     * More wait states than needed is always safe, so set them first. */
     FLASH_R->ACR = FLASH_ACR_LATENCY(7) | FLASH_ACR_PRFTEN | FLASH_ACR_ARTEN;
+    while ((FLASH_R->ACR & 0xFU) != 7U) {}
 
-    /* Enable HSE */
-    RCC->CR |= RCC_CR_HSEON;
-    while (!(RCC->CR & RCC_CR_HSERDY)) {}
+    /* Run from HSI and stop the PLL */
+    RCC->CR |= RCC_CR_HSION;
+    while (!(RCC->CR & RCC_CR_HSIRDY)) {}
+    RCC->CFGR &= ~RCC_CFGR_SW_MASK;
+    while ((RCC->CFGR & RCC_CFGR_SWS_MASK) != RCC_CFGR_SWS_HSI) {}
+    RCC->CR &= ~RCC_CR_PLLON;
+    while (RCC->CR & RCC_CR_PLLRDY) {}
 
-    /* Enable PWR, set voltage scale 1 (max performance) */
+    /* Voltage scale 1 (VOS may only change while the PLL is off) */
     RCC->APB1ENR |= RCC_APB1ENR_PWREN;
-    /* PWR->CR1 scale 3→1 would go here; simplified for size */
+    (void)RCC->APB1ENR;
+    PWR->CR1 = (PWR->CR1 & ~PWR_CR1_VOS_MASK) | PWR_CR1_VOS_SCALE1;
 
-    /* Configure PLL: VCO=432, /2=216 SYSCLK, /9=48 USB */
-    /* PLLCFGR: PLLM=8, PLLN=432, PLLP=/2, PLLSRC=HSE, PLLQ=9 */
-    RCC->PLLCFGR = (8U      << 0)   /* PLLM  */
-                 | (432U    << 6)   /* PLLN  */
-                 | (0U      << 16)  /* PLLP = /2 */
-                 | (1U      << 22)  /* PLL src = HSE */
-                 | (9U      << 24); /* PLLQ  */
+    /* HSE, with a timeout: fall back to HSI rather than hang forever.
+     * Either way the PLL input is 1 MHz. */
+    uint32_t pllsrc = RCC_PLLCFGR_SRC_HSE;
+    uint32_t pllm   = HSE_HZ / 1000000U;
+    uint32_t spins  = 0;
+    RCC->CR |= RCC_CR_HSEON;
+    while (!(RCC->CR & RCC_CR_HSERDY)) {
+        if (++spins > HSE_STARTUP_SPINS) {
+            RCC->CR &= ~RCC_CR_HSEON;
+            pllsrc = 0;      /* HSI */
+            pllm   = 16U;
+            break;
+        }
+    }
 
-    /* Enable PLL */
+    /* PLLM=1 MHz in, PLLN=432, PLLP=/2 → 216 MHz, PLLQ=/9 → 48 MHz */
+    RCC->PLLCFGR = (RCC->PLLCFGR & ~RCC_PLLCFGR_MASK)
+                 | (pllm  << 0)    /* PLLM  */
+                 | (432U  << 6)    /* PLLN  */
+                 | (0U    << 16)   /* PLLP = /2 */
+                 | pllsrc          /* PLL source */
+                 | (9U    << 24);  /* PLLQ  */
     RCC->CR |= RCC_CR_PLLON;
-    while (!(RCC->CR & RCC_CR_PLLRDY)) {}
+
+    /* Over-drive: enable, then switch the regulator to it */
+    PWR->CR1 |= PWR_CR1_ODEN;
+    while (!(PWR->CSR1 & PWR_CSR1_ODRDY)) {}
+    PWR->CR1 |= PWR_CR1_ODSWEN;
+    while (!(PWR->CSR1 & PWR_CSR1_ODSWRDY)) {}
 
     /* Bus dividers: AHB=/1, APB1=/4, APB2=/2 */
-    RCC->CFGR = (0U << 4)    /* HPRE  /1   */
+    RCC->CFGR = (RCC->CFGR & ~RCC_CFGR_PRE_MASK)
+              | (0U << 4)    /* HPRE  /1   */
               | (5U << 10)   /* PPRE1 /4   */
               | (4U << 13);  /* PPRE2 /2   */
 
-    /* Switch to PLL */
-    RCC->CFGR |= RCC_CFGR_SW_PLL;
+    /* Wait for lock, then switch to PLL */
+    while (!(RCC->CR & RCC_CR_PLLRDY)) {}
+    RCC->CFGR = (RCC->CFGR & ~RCC_CFGR_SW_MASK) | RCC_CFGR_SW_PLL;
     while ((RCC->CFGR & RCC_CFGR_SWS_MASK) != RCC_CFGR_SWS_PLL) {}
 }
 

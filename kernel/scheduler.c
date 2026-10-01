@@ -31,14 +31,16 @@ void scheduler_add_task(const char *name, task_fn_t fn, uint8_t prio) {
     s_ntasks++;
 }
 
-/* Run highest-priority non-waiting task */
+/* Run highest-priority non-waiting task. The scan starts just after
+ * the task that ran last and only a strictly higher priority replaces
+ * the current pick, so tasks of equal priority take turns. */
 void scheduler_run_next(void) {
     int8_t best = -1;
     uint8_t best_prio = 0;
 
     for (uint8_t i = 0; i < s_ntasks; i++) {
         uint8_t idx = (s_current + 1 + i) % s_ntasks;
-        if (!s_tasks[idx].waiting && s_tasks[idx].prio >= best_prio) {
+        if (!s_tasks[idx].waiting && (best < 0 || s_tasks[idx].prio > best_prio)) {
             best      = (int8_t)idx;
             best_prio = s_tasks[idx].prio;
         }

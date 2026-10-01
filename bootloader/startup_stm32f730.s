@@ -6,8 +6,14 @@
     .cpu cortex-m7
     .thumb
 
+/* IRQ numbers (STM32F7 reference manual, vector table) */
+    .equ    IRQ_USART1,   37
+    .equ    IRQ_TIM6_DAC, 54
+    .equ    IRQ_SLOTS,    240       /* covers every STM32F7 IRQ */
+
     .section .isr_vector,"a",%progbits
-    .type g_vectors, %object
+    .type   g_vectors, %object
+    .global g_vectors
 g_vectors:
     .word   _estack                 /* 00: Initial stack pointer    */
     .word   Reset_Handler           /* 01: Reset                    */
@@ -25,10 +31,21 @@ g_vectors:
     .word   0                       /* 13: Reserved                 */
     .word   PendSV_Handler          /* 14: PendSV                   */
     .word   SysTick_Handler         /* 15: SysTick                  */
-    /* External interrupts — only ones we use */
-    .rept   256
+
+    /* External interrupts — entry N is IRQ N. Handlers we implement
+     * are named here so the linker keeps them; the rest are unused. */
+    .rept   IRQ_USART1
     .word   Default_Handler
     .endr
+    .word   USART1_IRQHandler                   /* IRQ 37 */
+    .rept   IRQ_TIM6_DAC - IRQ_USART1 - 1
+    .word   Default_Handler
+    .endr
+    .word   TIM6_DAC_IRQHandler                 /* IRQ 54 */
+    .rept   IRQ_SLOTS - IRQ_TIM6_DAC - 1
+    .word   Default_Handler
+    .endr
+    .size   g_vectors, . - g_vectors
 
 /* ── Reset handler ──────────────────────────────────────────── */
     .text
@@ -36,9 +53,34 @@ g_vectors:
     .global Reset_Handler
     .type   Reset_Handler, %function
 Reset_Handler:
-    /* Set MSP to top of DTCM stack */
+    /* We are normally started by a bootloader: keep interrupts masked
+     * until our vector table, .data and .bss are in place. */
+    cpsid   i
+
+    /* Set MSP to the top of the DTCM stack */
     ldr     r0, =_estack
     msr     msp, r0
+
+    /* Point VTOR at our own vector table (SCB->VTOR) */
+    ldr     r0, =0xE000ED08
+    ldr     r1, =g_vectors
+    str     r1, [r0]
+    dsb
+    isb
+
+    /* Disable and un-pend every IRQ the bootloader may have left on;
+     * otherwise they would fire into Default_Handler. */
+    ldr     r0, =0xE000E180         /* NVIC->ICER[0] */
+    ldr     r1, =0xE000E280         /* NVIC->ICPR[0] */
+    mov     r2, #-1
+    mov     r3, #8
+clear_nvic_loop:
+    str     r2, [r0], #4
+    str     r2, [r1], #4
+    subs    r3, r3, #1
+    bne     clear_nvic_loop
+    dsb
+    isb
 
     /* Copy .data from flash to RAM */
     ldr     r0, =_sidata
@@ -50,7 +92,7 @@ copy_data_loop:
     str     r3, [r1], #4
 copy_data_chk:
     cmp     r1, r2
-    blt     copy_data_loop
+    blo     copy_data_loop
 
     /* Zero .bss */
     ldr     r0, =_sbss
@@ -61,7 +103,7 @@ zero_bss_loop:
     str     r2, [r0], #4
 zero_bss_chk:
     cmp     r0, r1
-    blt     zero_bss_loop
+    blo     zero_bss_loop
 
     /* Enable FPU (CPACR — full access CP10/CP11) */
     ldr     r0, =0xE000ED88
@@ -71,30 +113,45 @@ zero_bss_chk:
     dsb
     isb
 
+    /* Runtime state is ready: interrupts may now be taken */
+    cpsie   i
+
     /* Jump to C bootloader */
     bl      boot_main
     b       .
+    .size   Reset_Handler, . - Reset_Handler
 
-/* ── Default / fault handlers ───────────────────────────────── */
+/* ── Default / fault handlers ───────────────────────────────────
+ * Every vector must have its Thumb bit set, so handlers are declared
+ * with .thumb_func / .thumb_set rather than as bare labels.        */
     .thumb_func
     .global Default_Handler
+    .type   Default_Handler, %function
 Default_Handler:
-HardFault_Handler:
-MemManage_Handler:
-BusFault_Handler:
-UsageFault_Handler:
     b       .   /* Spin — attach debugger to read fault registers */
+    .size   Default_Handler, . - Default_Handler
 
     .thumb_func
-NMI_Handler:
-SVC_Handler:
-DebugMon_Handler:
-PendSV_Handler:
+    .type   Ignore_Handler, %function
+Ignore_Handler:
     bx      lr
+    .size   Ignore_Handler, . - Ignore_Handler
 
-    .weak   SysTick_Handler
-    .thumb_func
-SysTick_Handler:
-    bx      lr
+    .macro  weak_alias name, target
+    .weak   \name
+    .thumb_set \name, \target
+    .endm
+
+    weak_alias HardFault_Handler,   Default_Handler
+    weak_alias MemManage_Handler,   Default_Handler
+    weak_alias BusFault_Handler,    Default_Handler
+    weak_alias UsageFault_Handler,  Default_Handler
+    weak_alias NMI_Handler,         Ignore_Handler
+    weak_alias SVC_Handler,         Ignore_Handler
+    weak_alias DebugMon_Handler,    Ignore_Handler
+    weak_alias PendSV_Handler,      Ignore_Handler
+    weak_alias SysTick_Handler,     Ignore_Handler
+    weak_alias USART1_IRQHandler,   Default_Handler
+    weak_alias TIM6_DAC_IRQHandler, Default_Handler
 
     .end

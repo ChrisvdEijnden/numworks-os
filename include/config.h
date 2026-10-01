@@ -6,6 +6,7 @@
 #pragma once
 
 /* ── Clock ──────────────────────────────────────────────────── */
+#define HSE_HZ            8000000UL   /* external crystal (HSI 16 MHz used if it fails) */
 #define SYSCLK_HZ       216000000UL
 #define APB1_HZ          54000000UL
 #define APB2_HZ         108000000UL

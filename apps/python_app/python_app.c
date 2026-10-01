@@ -41,7 +41,8 @@ static void py_print(const char *s) {
         }
         if (*s == '\n' || col >= COLS) {
             s_nout++;
-            if (s_nout > 9999) s_nout = OROWS;
+            /* wrap, keeping s_nout % OROWS so the ring stays in order */
+            if (s_nout > 1000000) s_nout = OROWS + s_nout % OROWS;
             int nr = s_nout % OROWS;
             memset(s_output[nr], 0, COLS+1);
             if (*s == '\n') s++;
@@ -49,14 +50,16 @@ static void py_print(const char *s) {
     }
 }
 
+/* s_output is a ring: line n lives in s_output[n % OROWS]. Show the
+ * last OROWS lines, ending with the line being printed. */
 static void draw_output(void) {
-    int start = s_nout > OROWS ? s_nout - OROWS : 0;
+    int first = s_nout - (OROWS - 1);
     for (int r = 0; r < OROWS; r++) {
-        int li = start + r;
+        int li = first + r;
         int y  = HEADER_H + r * 14;
-        if (li < s_nout) {
+        if (li >= 0) {
             char padded[COLS+1];
-            snprintf(padded, sizeof(padded), "%-*s", COLS, s_output[li]);
+            snprintf(padded, sizeof(padded), "%-*s", COLS, s_output[li % OROWS]);
             display_str(0, y, padded, RGB(180,255,180), C_BG);
         } else {
             display_fill_rect(0, y, LCD_WIDTH, 14, C_BG);

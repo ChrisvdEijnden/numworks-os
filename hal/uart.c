@@ -6,13 +6,15 @@
  * Uses a 64-byte RX ring buffer (no DMA needed at 115200)
  * ================================================================ */
 #include "uart.h"
+#include <stdbool.h>
 #include "../include/stm32f730.h"
 #include "../include/config.h"
 #include "../include/string.h"
 
 #define RX_BUF 64
 static char     s_rxbuf[RX_BUF];
-static uint8_t  s_rxhead = 0, s_rxtail = 0;
+static volatile uint8_t s_rxhead = 0, s_rxtail = 0;   /* shared with the IRQ */
+static bool     s_tx_dead = false;
 
 void hal_uart_init(void) {
     /* Clock USART1 + GPIOA */
@@ -27,9 +29,11 @@ void hal_uart_init(void) {
     GPIOA->AFR[1] &= ~(0xFFU << 4);
     GPIOA->AFR[1] |=  (0x77U << 4);
 
-    /* BRR = fAPB2 / baud */
-    USART1->BRR = (uint32_t)(APB2_HZ / DEBUG_BAUD);
-    USART1->CR1 = USART_CR1_UE | USART_CR1_TE | USART_CR1_RE | USART_CR1_RXNEIE;
+    /* BRR = fAPB2 / baud (oversampling by 16), rounded; written while UE=0 */
+    USART1->CR1 = 0;
+    USART1->BRR = (uint32_t)((APB2_HZ + DEBUG_BAUD / 2) / DEBUG_BAUD);
+    USART1->CR1 = USART_CR1_TE | USART_CR1_RE | USART_CR1_RXNEIE;
+    USART1->CR1 |= USART_CR1_UE;
 
     /* Enable USART1 IRQ in NVIC */
     nvic_enable(37);  /* USART1 global IRQ = 37 on STM32F7 */
@@ -37,8 +41,13 @@ void hal_uart_init(void) {
 
 /* RX interrupt */
 void USART1_IRQHandler(void) {
-    if (USART1->SR & USART_SR_RXNE) {
-        char c = (char)(USART1->DR & 0xFF);
+    uint32_t isr = USART1->ISR;
+    if (isr & USART_ISR_ORE) {
+        /* Overrun also raises this IRQ and stays set until cleared */
+        USART1->ICR = USART_ICR_ORECF;
+    }
+    if (isr & USART_ISR_RXNE) {
+        char c = (char)(USART1->RDR & 0xFF);
         uint8_t next = (s_rxtail + 1) % RX_BUF;
         if (next != s_rxhead) {
             s_rxbuf[s_rxtail] = c;
@@ -48,9 +57,15 @@ void USART1_IRQHandler(void) {
 }
 
 void hal_uart_putc(char c) {
+    /* Debug output must never be able to hang the system: if the
+     * transmitter doesn't drain, give up on the UART for good. */
+    if (s_tx_dead) return;
     if (c == '\n') hal_uart_putc('\r');
-    while (!(USART1->SR & USART_SR_TXE)) {}
-    USART1->DR = (uint8_t)c;
+    uint32_t spins = 0;
+    while (!(USART1->ISR & USART_ISR_TXE)) {
+        if (++spins > 1000000U) { s_tx_dead = true; return; }
+    }
+    USART1->TDR = (uint8_t)c;
 }
 
 void hal_uart_puts(const char *s) {

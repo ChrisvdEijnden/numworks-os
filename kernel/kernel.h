@@ -44,6 +44,7 @@ void  kernel_run(void);
 void  kernel_post_event(uint8_t key, uint8_t action);
 bool  kernel_event_get(kernel_event_t *out);
 void  kernel_set_app(app_state_t app);
+void  kernel_request_redraw(void);   /* repaint the current app on the next loop */
 app_state_t kernel_get_app(void);
 
 /* Built-in task prototypes */

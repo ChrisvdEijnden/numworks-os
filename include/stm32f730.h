@@ -30,9 +30,14 @@ typedef struct {
 #define RCC_CR_HSERDY       (1U<<17)
 #define RCC_CR_PLLON        (1U<<24)
 #define RCC_CR_PLLRDY       (1U<<25)
+#define RCC_CFGR_SW_MASK    (3U<<0)
 #define RCC_CFGR_SW_PLL     (2U<<0)
 #define RCC_CFGR_SWS_MASK   (3U<<2)
+#define RCC_CFGR_SWS_HSI    (0U<<2)
 #define RCC_CFGR_SWS_PLL    (2U<<2)
+#define RCC_CFGR_PRE_MASK   ((0xFU<<4) | (7U<<10) | (7U<<13))  /* HPRE, PPRE1, PPRE2 */
+#define RCC_PLLCFGR_SRC_HSE (1U<<22)
+#define RCC_PLLCFGR_MASK    0x0F437FFFU   /* PLLM, PLLN, PLLP, PLLSRC, PLLQ */
 #define RCC_AHB1ENR_GPIOAEN (1U<<0)
 #define RCC_AHB1ENR_GPIOBEN (1U<<1)
 #define RCC_AHB1ENR_GPIOCEN (1U<<2)
@@ -41,6 +46,16 @@ typedef struct {
 #define RCC_APB1ENR_USART2EN (1U<<17)
 #define RCC_APB1ENR_PWREN   (1U<<28)
 #define RCC_APB2ENR_USART1EN (1U<<4)
+
+/* PWR */
+typedef struct { vu32 CR1; vu32 CSR1; vu32 CR2; vu32 CSR2; } PWR_TypeDef;
+#define PWR ((PWR_TypeDef *)(APB1_BASE + 0x7000UL))
+#define PWR_CR1_VOS_MASK    (3U<<14)
+#define PWR_CR1_VOS_SCALE1  (3U<<14)
+#define PWR_CR1_ODEN        (1U<<16)
+#define PWR_CR1_ODSWEN      (1U<<17)
+#define PWR_CSR1_ODRDY      (1U<<16)
+#define PWR_CSR1_ODSWRDY    (1U<<17)
 
 /* GPIO */
 typedef struct {
@@ -54,17 +69,24 @@ typedef struct {
 #define GPIOD ((GPIO_TypeDef *)(AHB1_BASE + 0x0C00UL))
 #define GPIOE ((GPIO_TypeDef *)(AHB1_BASE + 0x1000UL))
 
-/* USART */
+/* USART — STM32F7 layout (differs from F1/F4: no SR/DR, see RM0431) */
 typedef struct {
-    vu32 SR; vu32 DR; vu32 BRR; vu32 CR1; vu32 CR2; vu32 CR3; vu32 GTPR;
+    vu32 CR1;  vu32 CR2;  vu32 CR3; vu32 BRR;
+    vu32 GTPR; vu32 RTOR; vu32 RQR; vu32 ISR;
+    vu32 ICR;  vu32 RDR;  vu32 TDR;
 } USART_TypeDef;
+_Static_assert(offsetof(USART_TypeDef, BRR) == 0x0C, "USART BRR offset");
+_Static_assert(offsetof(USART_TypeDef, ISR) == 0x1C, "USART ISR offset");
+_Static_assert(offsetof(USART_TypeDef, TDR) == 0x28, "USART TDR offset");
 #define USART1 ((USART_TypeDef *)(APB2_BASE + 0x1000UL))
 #define USART2 ((USART_TypeDef *)(APB1_BASE + 0x4400UL))
-#define USART_SR_TXE  (1U<<7)
-#define USART_SR_RXNE (1U<<5)
-#define USART_CR1_UE  (1U<<13)
-#define USART_CR1_TE  (1U<<3)
-#define USART_CR1_RE  (1U<<2)
+#define USART_ISR_ORE    (1U<<3)
+#define USART_ISR_RXNE   (1U<<5)
+#define USART_ISR_TXE    (1U<<7)
+#define USART_ICR_ORECF  (1U<<3)
+#define USART_CR1_UE     (1U<<0)
+#define USART_CR1_RE     (1U<<2)
+#define USART_CR1_TE     (1U<<3)
 #define USART_CR1_RXNEIE (1U<<5)
 
 /* TIM */
@@ -76,6 +98,7 @@ typedef struct {
 #define TIM6 ((TIM_TypeDef *)(APB1_BASE + 0x1000UL))
 #define TIM_CR1_CEN  (1U<<0)
 #define TIM_DIER_UIE (1U<<0)
+#define TIM_EGR_UG   (1U<<0)
 #define TIM_SR_UIF   (1U<<0)
 
 /* Flash */
@@ -92,7 +115,18 @@ typedef struct {
 #define FLASH_CR_PSIZE_32 (2U<<8)
 #define FLASH_CR_STRT (1U<<16)
 #define FLASH_CR_LOCK (1U<<31)
-#define FLASH_SR_BSY  (1U<<16)
+#define FLASH_SR_EOP    (1U<<0)
+#define FLASH_SR_OPERR  (1U<<1)
+#define FLASH_SR_WRPERR (1U<<4)
+#define FLASH_SR_PGAERR (1U<<5)
+#define FLASH_SR_PGPERR (1U<<6)
+#define FLASH_SR_ERSERR (1U<<7)
+#define FLASH_SR_ERRORS (FLASH_SR_OPERR | FLASH_SR_WRPERR | FLASH_SR_PGAERR | \
+                         FLASH_SR_PGPERR | FLASH_SR_ERSERR)
+#define FLASH_SR_BSY    (1U<<16)
+/* Device electronic signature: internal flash size in KB (RM0431, F72x/F73x) */
+#define FLASH_SIZE_KB   (*(const volatile uint16_t *)0x1FF07A22UL)
+#define FLASH_BASE_ADDR 0x08000000UL
 #define FLASH_ACR_LATENCY(n) (n)
 #define FLASH_ACR_PRFTEN (1U<<8)
 #define FLASH_ACR_ARTEN  (1U<<9)
