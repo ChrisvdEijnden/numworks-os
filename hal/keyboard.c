@@ -5,6 +5,9 @@
  * NumWorks uses a 9×6 GPIO matrix.
  * Rows are driven low one-at-a-time (open-drain), columns are read.
  * Debounce: 2 identical reads, SCAN_PERIOD_MS apart = stable.
+ * While no key is down, one read with every row driven tells whether
+ * anything was pressed, so an idle keyboard costs one settle time per
+ * scan instead of nine.
  * ================================================================ */
 #include "keyboard.h"
 #include "hal.h"
@@ -14,19 +17,20 @@
 #include <string.h>
 #include <stdio.h>
 
-/* Keyboard matrix GPIO mapping — NOT verified against a schematic (kept
- * from the original code); check before relying on it.
- * Rows:  PC0 PC1 PC2 PC3 PC4 PC5 PB0 PB1 PB2
- * Cols:  PA0 PA1 PA2 PA3 PA4 PA5  */
+/* Matrix wiring of the N0110 (include/config.h):
+ * Rows A..I: PA1 PA0 PA2 PA3 PA4 PA5 PA6 PA7 PA8 (open-drain outputs)
+ * Cols 1..6: PC0 PC1 PC2 PC3 PC4 PC5 (inputs, pulled up) */
 #define NROWS KEY_ROWS
 #define NCOLS KEY_COLS
 
-static const uint32_t ROW_PINS[NROWS] = {0,1,2,3,4,5,0,1,2};  /* pin number */
-static GPIO_TypeDef * const ROW_PORTS[NROWS] = {
-    GPIOC,GPIOC,GPIOC,GPIOC,GPIOC,GPIOC,GPIOB,GPIOB,GPIOB
-};
-static const uint32_t COL_PINS[NCOLS] = {0,1,2,3,4,5};
-#define COL_PORT GPIOA
+static const uint8_t ROW_PINS[NROWS] = {1,0,2,3,4,5,6,7,8};
+static const uint8_t COL_PINS[NCOLS] = {0,1,2,3,4,5};
+#define ROW_PORT KBD_ROW_PORT
+#define COL_PORT KBD_COL_PORT
+
+/* Time for the column lines to follow a row change; NumWorks' own
+ * firmware waits 100 us */
+#define SETTLE_US 100
 
 /* Map matrix (row,col) → key_code_t. This is NumWorks' own key order
  * (Epsilon's ion::Keyboard::Key, index = row*6 + column), i.e. the
@@ -50,6 +54,7 @@ static const key_code_t s_matrix[NROWS][NCOLS] = {
 
 static uint8_t s_state[NROWS][NCOLS];
 static uint8_t s_debounce[NROWS][NCOLS];
+static bool     s_any_down;    /* some key down or being debounced */
 static uint16_t s_row_ok;      /* bit r set: row r is ours to drive */
 static uint8_t  s_col_ok;      /* bit c set: column c is ours to read */
 static uint32_t s_last_scan;
@@ -83,23 +88,36 @@ static void report_skipped(const char *what, int idx) {
     hal_uart_puts(msg);
 }
 
+/* Drive the rows in `mask` low, wait for the columns to settle and
+ * return the columns that read low (pressed), then release the rows */
+static uint8_t read_columns(uint16_t mask) {
+    uint32_t bits = 0;
+    for (int r = 0; r < NROWS; r++)
+        if (mask & s_row_ok & (1U << r)) bits |= 1U << ROW_PINS[r];
+    if (!bits) return 0;
+    ROW_PORT->BSRR = bits << 16;                 /* low */
+    hal_delay_us(SETTLE_US);
+    uint32_t idr = COL_PORT->IDR;
+    ROW_PORT->BSRR = bits;                       /* released (high-Z) */
+    uint8_t down = 0;
+    for (int c = 0; c < NCOLS; c++)
+        if ((s_col_ok & (1U << c)) && !((idr >> COL_PINS[c]) & 1U)) down |= 1U << c;
+    return down;
+}
+
 /* One pass over the matrix. With report=false the state is learned
  * without queueing events. */
 static void keyboard_scan(bool report) {
+    if (!s_any_down && read_columns(0x1FFU) == 0) return;   /* all idle */
+    bool any = false;
     for (int r = 0; r < NROWS; r++) {
         if (!(s_row_ok & (1U << r))) continue;
-        GPIO_TypeDef *rp = ROW_PORTS[r];
-        uint32_t rpin = ROW_PINS[r];
-        /* Drive row low, let the column lines settle (a few µs) */
-        rp->BSRR = (1U << (rpin + 16));
-        for (volatile int d = 0; d < 200; d++) {}
-        uint32_t idr = COL_PORT->IDR;
-        /* Release row */
-        rp->BSRR = (1U << rpin);
+        uint8_t down = read_columns(1U << r);
 
         for (int c = 0; c < NCOLS; c++) {
             if (!(s_col_ok & (1U << c))) continue;
-            uint8_t pressed = !((idr >> COL_PINS[c]) & 1);
+            uint8_t pressed = (down >> c) & 1U;
+            any |= pressed | s_state[r][c];
 
             if (pressed == s_debounce[r][c]) {
                 if (pressed != s_state[r][c]) {
@@ -119,35 +137,34 @@ static void keyboard_scan(bool report) {
             s_debounce[r][c] = pressed;
         }
     }
+    s_any_down = any;
 }
 
 void keyboard_init(void) {
     s_row_ok = 0;
     s_col_ok = 0;
     /* Rows: open-drain output, released (high-Z) when not scanned, so
-     * two keys pressed in one column can't short two driven rows. Pins
-     * that another peripheral already owns (e.g. the QSPI clock we are
-     * executing from) are left alone. */
+     * two keys pressed in one column can't short two driven rows. A pin
+     * that another peripheral already owns is left alone (and logged). */
     for (int r = 0; r < NROWS; r++) {
-        GPIO_TypeDef *p = ROW_PORTS[r];
         uint32_t pin = ROW_PINS[r];
-        if (gpio_pin_is_af(p, pin)) { report_skipped("row", r); continue; }
-        p->BSRR    = (1U << pin);                 /* released */
-        p->OTYPER |= (1U << pin);                 /* open-drain */
-        p->MODER   = (p->MODER & ~(3U << (pin*2))) | (1U << (pin*2));
-        s_row_ok  |= (uint16_t)(1U << r);
+        if (gpio_pin_is_af(ROW_PORT, pin)) { report_skipped("row", r); continue; }
+        ROW_PORT->BSRR    = (1U << pin);          /* released */
+        ROW_PORT->OTYPER |= (1U << pin);          /* open-drain */
+        gpio_pull(ROW_PORT, pin, GPIO_PULL_NONE);
+        gpio_mode(ROW_PORT, pin, 1U);
+        s_row_ok |= (uint16_t)(1U << r);
     }
     /* Cols: input with pull-up */
     for (int c = 0; c < NCOLS; c++) {
         uint32_t pin = COL_PINS[c];
         if (gpio_pin_is_af(COL_PORT, pin)) { report_skipped("column", c); continue; }
-        COL_PORT->MODER &= ~(3U << (pin*2));  /* input */
-        COL_PORT->PUPDR &= ~(3U << (pin*2));
-        COL_PORT->PUPDR |=  (1U << (pin*2));   /* pull-up */
+        gpio_input(COL_PORT, pin, GPIO_PULL_UP);
         s_col_ok |= (uint8_t)(1U << c);
     }
     memset(s_state,    0, sizeof(s_state));
     memset(s_debounce, 0, sizeof(s_debounce));
+    s_any_down = true;                           /* first scan reads every row */
 
     /* Learn which keys are already held (e.g. HOME at boot) without
      * reporting them as presses. */
@@ -178,18 +195,7 @@ bool keyboard_poll(key_event_t *ev) {
 /* Whether any key is down right now, read straight from the matrix:
  * no debouncing, no events, no SysTick. For the crash screen. */
 bool keyboard_raw_any(void) {
-    for (int r = 0; r < NROWS; r++) {
-        if (!(s_row_ok & (1U << r))) continue;
-        GPIO_TypeDef *rp = ROW_PORTS[r];
-        uint32_t rpin = ROW_PINS[r];
-        rp->BSRR = (1U << (rpin + 16));
-        for (volatile int d = 0; d < 200; d++) {}
-        uint32_t idr = COL_PORT->IDR;
-        rp->BSRR = (1U << rpin);
-        for (int c = 0; c < NCOLS; c++)
-            if ((s_col_ok & (1U << c)) && !((idr >> COL_PINS[c]) & 1)) return true;
-    }
-    return false;
+    return read_columns(0x1FFU) != 0;
 }
 
 bool keyboard_is_pressed(key_code_t k) {
@@ -254,4 +260,9 @@ char key_to_char(key_code_t k, bool shift, bool alpha) {
         case KEY_XNT:    return 'x';
         default:         return 0;
     }
+}
+
+key_code_t keyboard_key_at(unsigned index) {
+    if (index >= NROWS * NCOLS) return KEY_NONE;
+    return s_matrix[index / NCOLS][index % NCOLS];
 }

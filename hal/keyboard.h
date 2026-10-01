@@ -30,6 +30,9 @@ void keyboard_init(void);
 bool keyboard_poll(key_event_t *ev);  /* Returns true if event ready */
 bool keyboard_raw_any(void);   /* unfiltered matrix read, for fault handlers */
 bool keyboard_is_pressed(key_code_t k);
+/* The key at NumWorks' key number (row * 6 + column, as Epsilon and
+ * its Python `ion` module number them); KEY_NONE for a gap */
+key_code_t keyboard_key_at(unsigned index);
 
 /* OK and EXE both confirm: always test for "execute" with this */
 static inline bool key_is_exe(key_code_t k) { return k == KEY_EXE || k == KEY_OK; }

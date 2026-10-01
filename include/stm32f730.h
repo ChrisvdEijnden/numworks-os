@@ -23,6 +23,8 @@ typedef struct {
     vu32 APB1ENR;  vu32 APB2ENR;
 } RCC_TypeDef;
 #define RCC ((RCC_TypeDef *)RCC_BASE)
+#define RCC_DCKCFGR2 (*(volatile uint32_t *)(RCC_BASE + 0x90UL))
+#define RCC_DCKCFGR2_CK48MSEL (1U<<27)   /* 0: 48 MHz from PLLQ */
 
 #define RCC_CR_HSION        (1U<<0)
 #define RCC_CR_HSIRDY       (1U<<1)
@@ -46,6 +48,7 @@ typedef struct {
 #define RCC_APB1ENR_USART2EN (1U<<17)
 #define RCC_APB1ENR_PWREN   (1U<<28)
 #define RCC_APB2ENR_USART1EN (1U<<4)
+#define RCC_APB2ENR_USART6EN (1U<<5)
 
 /* PWR */
 typedef struct { vu32 CR1; vu32 CSR1; vu32 CR2; vu32 CSR2; } PWR_TypeDef;
@@ -76,6 +79,46 @@ static inline bool gpio_pin_is_af(const GPIO_TypeDef *p, uint32_t pin) {
     return ((p->MODER >> (pin * 2U)) & 3U) == 2U;
 }
 
+/* Pin set-up. The output level is set before the pin becomes an output,
+ * so it never glitches. Pull: 0 none, 1 up, 2 down. */
+#define GPIO_PULL_NONE 0U
+#define GPIO_PULL_UP   1U
+#define GPIO_PULL_DOWN 2U
+static inline void gpio_mode(GPIO_TypeDef *p, uint32_t pin, uint32_t mode) {
+    p->MODER = (p->MODER & ~(3U << (pin * 2U))) | (mode << (pin * 2U));
+}
+static inline void gpio_pull(GPIO_TypeDef *p, uint32_t pin, uint32_t pull) {
+    p->PUPDR = (p->PUPDR & ~(3U << (pin * 2U))) | (pull << (pin * 2U));
+}
+static inline void gpio_write(GPIO_TypeDef *p, uint32_t pin, bool high) {
+    p->BSRR = high ? (1U << pin) : (1U << (pin + 16U));
+}
+static inline bool gpio_read(const GPIO_TypeDef *p, uint32_t pin) {
+    return (p->IDR >> pin) & 1U;
+}
+static inline void gpio_output(GPIO_TypeDef *p, uint32_t pin, bool high) {
+    gpio_write(p, pin, high);
+    p->OTYPER &= ~(1U << pin);                   /* push-pull */
+    gpio_pull(p, pin, GPIO_PULL_NONE);
+    gpio_mode(p, pin, 1U);
+}
+static inline void gpio_input(GPIO_TypeDef *p, uint32_t pin, uint32_t pull) {
+    gpio_pull(p, pin, pull);
+    gpio_mode(p, pin, 0U);
+}
+static inline void gpio_analog(GPIO_TypeDef *p, uint32_t pin) {
+    gpio_pull(p, pin, GPIO_PULL_NONE);
+    gpio_mode(p, pin, 3U);
+}
+/* speed: 0 low ... 3 very high */
+static inline void gpio_af(GPIO_TypeDef *p, uint32_t pin, uint32_t af, uint32_t speed) {
+    p->AFR[pin >> 3] = (p->AFR[pin >> 3] & ~(0xFU << ((pin & 7U) * 4U))) |
+                       (af << ((pin & 7U) * 4U));
+    p->OSPEEDR = (p->OSPEEDR & ~(3U << (pin * 2U))) | (speed << (pin * 2U));
+    gpio_pull(p, pin, GPIO_PULL_NONE);
+    gpio_mode(p, pin, 2U);
+}
+
 /* USART — STM32F7 layout (differs from F1/F4: no SR/DR, see RM0431) */
 typedef struct {
     vu32 CR1;  vu32 CR2;  vu32 CR3; vu32 BRR;
@@ -86,9 +129,11 @@ _Static_assert(offsetof(USART_TypeDef, BRR) == 0x0C, "USART BRR offset");
 _Static_assert(offsetof(USART_TypeDef, ISR) == 0x1C, "USART ISR offset");
 _Static_assert(offsetof(USART_TypeDef, TDR) == 0x28, "USART TDR offset");
 #define USART1 ((USART_TypeDef *)(APB2_BASE + 0x1000UL))
+#define USART6 ((USART_TypeDef *)(APB2_BASE + 0x1400UL))
 #define USART2 ((USART_TypeDef *)(APB1_BASE + 0x4400UL))
 #define USART_ISR_ORE    (1U<<3)
 #define USART_ISR_RXNE   (1U<<5)
+#define USART_ISR_TC     (1U<<6)
 #define USART_ISR_TXE    (1U<<7)
 #define USART_ICR_ORECF  (1U<<3)
 #define USART_CR1_UE     (1U<<0)
@@ -101,8 +146,13 @@ typedef struct {
     vu32 CR1; vu32 CR2; vu32 SMCR; vu32 DIER;
     vu32 SR;  vu32 EGR; vu32 CCMR1; vu32 CCMR2;
     vu32 CCER; vu32 CNT; vu32 PSC;  vu32 ARR;
+    vu32 RCR;  vu32 CCR1; vu32 CCR2; vu32 CCR3; vu32 CCR4;
 } TIM_TypeDef;
+_Static_assert(offsetof(TIM_TypeDef, CCR1) == 0x34, "TIM CCR1 offset");
+#define TIM3 ((TIM_TypeDef *)(APB1_BASE + 0x0400UL))
 #define TIM6 ((TIM_TypeDef *)(APB1_BASE + 0x1000UL))
+#define RCC_APB1ENR_TIM3EN (1U<<1)
+#define TIM_CR1_ARPE (1U<<7)
 #define TIM_CR1_CEN  (1U<<0)
 #define TIM_DIER_UIE (1U<<0)
 #define TIM_EGR_UG   (1U<<0)
@@ -183,5 +233,13 @@ typedef struct { vu32 KR; vu32 PR; vu32 RLR; vu32 SR; vu32 WINR; } IWDG_TypeDef;
 #define NVIC_BASE 0xE000E100UL
 typedef struct { vu32 ISER[8]; uint32_t R[24]; vu32 ICER[8]; } NVIC_Type;
 #define NVIC ((NVIC_Type *)NVIC_BASE)
+/* Debug cycle counter (DWT) */
+#define DEMCR        (*(volatile uint32_t *)0xE000EDFCUL)
+#define DEMCR_TRCENA (1U << 24)
+#define DWT_CTRL     (*(volatile uint32_t *)0xE0001000UL)
+#define DWT_CYCCNT   (*(volatile uint32_t *)0xE0001004UL)
+#define DWT_LAR      (*(volatile uint32_t *)0xE0001FB0UL)
+#define DWT_CTRL_CYCCNTENA (1U << 0)
+
 static inline void nvic_enable(uint8_t n)  { NVIC->ISER[n>>5] = 1U<<(n&31); }
 static inline void nvic_disable(uint8_t n) { NVIC->ICER[n>>5] = 1U<<(n&31); }

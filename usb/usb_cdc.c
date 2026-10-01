@@ -13,13 +13,12 @@
  *
  * The PC side is tools/upload.py (and tools/transfer.py).
  *
- * The protocol only talks to two ring buffers. A USB device stack moves
- * bytes in and out of them with usb_cdc_rx_push() / usb_cdc_tx_pop().
- * NOTE: that stack does not exist yet — the OTG_FS core is only clocked
- * and pinned out below; enumeration, descriptors and endpoints still
- * have to be written (or ST's USB device library linked in).
+ * The protocol only talks to two ring buffers. The USB device stack
+ * (usb/usb_device.c) moves bytes in and out of them with
+ * usb_cdc_rx_push() / usb_cdc_tx_pop().
  * ================================================================ */
 #include "usb_cdc.h"
+#include "usb_device.h"
 #include "../fs/flashfs.h"
 #include "../hal/hal.h"
 #include "../include/stm32f730.h"
@@ -28,55 +27,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-/* ── OTG_FS register map (simplified) ───────────────────────── */
-#define OTG_FS_BASE 0x50000000UL
-typedef struct {
-    volatile uint32_t GOTGCTL;  /* 000 */
-    volatile uint32_t GOTGINT;  /* 004 */
-    volatile uint32_t GAHBCFG; /* 008 */
-    volatile uint32_t GUSBCFG; /* 00C */
-    volatile uint32_t GRSTCTL; /* 010 */
-    volatile uint32_t GINTSTS; /* 014 */
-    volatile uint32_t GINTMSK; /* 018 */
-    volatile uint32_t GRXSTSR; /* 01C */
-    volatile uint32_t GRXSTSP; /* 020 */
-    volatile uint32_t GRXFSIZ; /* 024 */
-    volatile uint32_t DIEPTXF0;/* 028 */
-    /* ... additional regs ... */
-} OTG_FS_TypeDef;
-#define OTG_FS ((OTG_FS_TypeDef *)OTG_FS_BASE)
-
 /* ── Ring buffers between the USB stack and the protocol ────── */
+/* Each index has one writer: the USB interrupt moves s_rx_tail and
+ * s_tx_head, the protocol (main loop) moves s_rx_head and s_tx_tail. */
 static uint8_t  s_txbuf[USB_TX_BUFSIZE];
 static uint8_t  s_rxbuf[USB_RX_BUFSIZE];
-static uint16_t s_tx_head = 0, s_tx_tail = 0;
-static uint16_t s_rx_head = 0, s_rx_tail = 0;
+static volatile uint16_t s_tx_head = 0, s_tx_tail = 0;
+static volatile uint16_t s_rx_head = 0, s_rx_tail = 0;
 
-/* ── Hardware init ───────────────────────────────────────────── */
 void usb_cdc_init(void) {
-    /* Enable OTG_FS clock */
-    RCC->AHB2ENR |= (1U << 7);  /* OTGFSEN */
-
-    /* PA11 = DM (AF10), PA12 = DP (AF10) */
-    GPIOA->MODER &= ~((3U<<22)|(3U<<24));
-    GPIOA->MODER |=   (2U<<22)|(2U<<24);
-    GPIOA->AFR[1] &= ~(0xFF << 12);
-    GPIOA->AFR[1] |=  (0xAA << 12);  /* AF10 */
-
-    /* Force device mode, disable VBUS sensing */
-    OTG_FS->GUSBCFG |= (1U<<30) | (1U<<20);  /* FDMOD | PVBUS */
-
-    /* Global interrupt mask — handled in process() by polling */
-    OTG_FS->GAHBCFG = 0;  /* Polling mode (no DMA) */
-
-    /*
-     * Full USB CDC enumeration requires descriptor tables and
-     * a complete control-transfer state machine (~4 KB).
-     * For production: link STM32 USB Device Library and call
-     * USBD_Init() / USBD_RegisterClass(&USBD_CDC) here.
-     *
-     * The protocol handler below works with any CDC implementation.
-     */
+    usb_device_init();
 }
 
 int usb_cdc_tx_free(void) {
@@ -94,6 +54,10 @@ int usb_cdc_write(const void *buf, int len) {
         s_tx_tail = next;
     }
     return written;
+}
+
+int usb_cdc_rx_free(void) {
+    return (int)((s_rx_head - s_rx_tail - 1 + USB_RX_BUFSIZE) % USB_RX_BUFSIZE);
 }
 
 int usb_cdc_available(void) {
@@ -305,6 +269,7 @@ static bool send_step(void) {
 
 /* Called in main event loop */
 void usb_cdc_process(void) {
+    usb_device_poll();                             /* connect, resume receiving */
     for (int guard = 0; guard < 1024; guard++) {   /* bounded work per call */
         bool progressed;
         switch (s_st) {
@@ -313,6 +278,7 @@ void usb_cdc_process(void) {
             case ST_SEND: progressed = send_step(); break;
             default:      progressed = line_step(); break;
         }
-        if (!progressed) return;
+        if (!progressed) break;
     }
+    usb_device_poll();                             /* send what was queued */
 }

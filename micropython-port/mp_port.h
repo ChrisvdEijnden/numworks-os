@@ -56,3 +56,4 @@ bool mp_heap_stats(uint32_t *used, uint32_t *total);
  * off the screen until the script ends */
 void nwos_mp_wait_ms(uint32_t ms);
 void nwos_mp_display_used(void);
+void nwos_mp_poll(void);          /* VM hook: keys (BACK stops), watchdog, output */

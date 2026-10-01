@@ -14,7 +14,7 @@
  *  RT9526A linear charger (VBUS in, battery out) and the USBLC6-2 is
  *  passive ESD protection. Bus-powered drives therefore can't work; a
  *  self-powered drive needs a role-swap the USB-C port may not offer.
- *  The OTG_FS core is also used in device mode by usb_cdc.c, so host
+ *  The OTG_FS core is also used in device mode by usb_device.c, so host
  *  mode is only started on request, never at boot.
  *
  * This file implements the state machine and HAL register access.

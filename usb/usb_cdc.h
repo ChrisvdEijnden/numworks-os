@@ -10,3 +10,4 @@ int      usb_cdc_tx_free(void);
 /* For the USB device stack: bytes received from / to be sent to the PC */
 int      usb_cdc_rx_push(const void *buf, int len);   /* returns bytes taken */
 int      usb_cdc_tx_pop(void *buf, int maxlen);       /* returns bytes given */
+int      usb_cdc_rx_free(void);                       /* room in the receive ring */

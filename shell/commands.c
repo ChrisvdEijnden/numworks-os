@@ -7,6 +7,7 @@
  * Code size target: < 6 KB
  * ================================================================ */
 #include "commands.h"
+#include "../hal/battery.h"
 #include "shell.h"
 #include "../fs/flashfs.h"
 #include "../kernel/kernel.h"
@@ -45,6 +46,7 @@ static void cmd_help(void) {
     shell_puts("  echo <text>     print text\n");
     shell_puts("  run <file.py>   execute Python script\n");
     shell_puts("  mem             show memory usage\n");
+    shell_puts("  bat             battery and charger\n");
     shell_puts("  fm              open file manager\n");
     shell_puts("  reboot          restart system\n");
 }
@@ -127,6 +129,16 @@ static void cmd_mem(void) {
     }
 }
 
+static void cmd_bat(void) {
+    static const char *LEVELS[] = { "bijna leeg", "laag", "half", "vol" };
+    uint32_t mv = battery_mv();
+    shell_print("Batterij: %lu.%02lu V (%s)\n", (unsigned long)(mv / 1000U),
+                (unsigned long)(mv % 1000U / 10U), LEVELS[battery_level()]);
+    shell_print("USB-voeding: %s\n", battery_usb_powered() ? "ja" : "nee");
+    if (battery_usb_powered())
+        shell_print("Laden: %s\n", battery_charging() ? "bezig" : "klaar");
+}
+
 static void cmd_run_script(void) {
     if (s_argc < 2) { shell_puts("Usage: run <file.py>\n"); return; }
     if (!flashfs_exists(s_argv[1])) {
@@ -159,6 +171,7 @@ static const cmd_entry_t s_cmds[] = {
     {"echo",   cmd_echo  },
     {"run",    cmd_run_script },
     {"mem",    cmd_mem   },
+    {"bat",    cmd_bat   },
     {"fm",     cmd_fm    },
     {"reboot", cmd_reboot},
     {NULL, NULL}

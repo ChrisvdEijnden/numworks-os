@@ -6,8 +6,9 @@
 #include "hal/hal.h"
 #include "hal/display.h"
 #include "hal/keyboard.h"
-#include "hal/timer.h"
 #include "hal/led.h"
+#include "hal/backlight.h"
+#include "hal/battery.h"
 #include "kernel/kernel.h"
 #include "fs/flashfs.h"
 #include "fs/storage.h"
@@ -35,7 +36,7 @@ static void boot_splash(uint32_t ms_start) {
     display_fill_rect(0, 0, LCD_WIDTH, 30, RGB(30,80,200));
     display_str(10,  8, "NumWorks OS",        WHITE, RGB(30,80,200));
     display_str(10, 40, "N0120 Custom Firmware",GREY, RGB(10,10,20));
-    display_str(10, 56, "STM32F730 @ 216 MHz",  GREY, RGB(10,10,20));
+    display_str(10, 56, "STM32F730 @ 192 MHz",  GREY, RGB(10,10,20));
     display_str(10, 72, "Initialiseren...",     RGB(100,200,255), RGB(10,10,20));
 
     /* Progress bar */
@@ -125,11 +126,12 @@ int main(void) {
     hal_init();
     hal_watchdog_start();
     display_init();
+    backlight_init();
     hal_boot_log("display");
     keyboard_init();
     hal_boot_log("keyboard");
-    hal_timer_init();
     led_init();
+    battery_init();
     boot_start = hal_tick_ms();
 
     /* 2. Kernel */

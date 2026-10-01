@@ -1,5 +1,5 @@
 /* ================================================================
- * NumWorks OS — Kernel (Extended for N0120 Custom Firmware)
+ * NumWorks OS — Kernel: event loop, tasks, sleep
  * File: kernel/kernel.c
  * ================================================================ */
 #include "kernel.h"
@@ -8,6 +8,9 @@
 #include "../hal/display.h"
 #include "../hal/keyboard.h"
 #include "../hal/led.h"
+#include "../hal/battery.h"
+#include "../hal/backlight.h"
+#include "../hal/clocks.h"
 #include "../shell/shell.h"
 #include "../ui/filemanager.h"
 #include "../usb/usb_cdc.h"
@@ -28,6 +31,7 @@ static kernel_t  g_kernel;
 static volatile bool s_redraw_pending = false;
 extern volatile uint32_t g_tick_ms, g_tick_step;
 static uint32_t s_last_input;   /* tick of the last key press */
+#define BATTERY_POLL_MS 2000U   /* battery and charger check */
 
 void SysTick_Handler(void) {
     g_tick_ms += g_tick_step;
@@ -71,29 +75,48 @@ void task_idle(void) {
 }
 
 /* ── Sleep ─────────────────────────────────────────────────────
- * ON/OFF, or no key press for AUTO_SLEEP_MS, turns the screen off and
- * slows SysTick to one tick per SLEEP_TICK_MS, so the CPU (waiting in
- * WFI) wakes 50 times a second instead of 1000. Only the keyboard and
- * the PC transfer protocol are serviced; ON/OFF wakes up. */
+ * ON/OFF, or no key press for AUTO_SLEEP_MS, switches the backlight
+ * off, powers the panel down and slows SysTick to one tick per
+ * SLEEP_TICK_MS, so the CPU (waiting in WFI) wakes 50 times a second
+ * instead of 1000. Without USB power the core also drops to 16 MHz
+ * (hal/clocks.c); with it, the clocks stay up so PC transfers keep
+ * working. The LED only shows the charge state. ON/OFF wakes up. */
 #define SLEEP_TICK_MS 20
+
+static void sleep_clocks(bool low) {
+    hal_uart_flush();
+    if (low) clocks_low(); else clocks_high();
+    hal_tick_set_period(SLEEP_TICK_MS);          /* SysTick counts CPU cycles */
+}
 
 static void power_sleep(void) {
     hal_uart_puts("sleep\n");
+    backlight_power(false);
     display_power(false);
     led_suspend();
     hal_tick_set_period(SLEEP_TICK_MS);
+    bool low = false;
+    uint32_t last_poll = g_tick_ms;
     for (;;) {
+        bool want_low = !battery_usb_powered();
+        if (want_low != low) { sleep_clocks(want_low); low = want_low; }
         hal_delay_ms(SLEEP_TICK_MS);
         key_event_t ev;
         bool wake = false;
         while (keyboard_poll(&ev))
             if (ev.key == KEY_ONOFF && ev.action == 0) wake = true;
         if (wake) break;
-        usb_cdc_process();
+        if (g_tick_ms - last_poll >= BATTERY_POLL_MS) {   /* LED: charge state */
+            last_poll = g_tick_ms;
+            battery_poll();
+        }
+        if (!low) usb_cdc_process();
     }
+    if (low) clocks_high();
     hal_tick_set_period(1);
     led_resume();
     display_power(true);
+    backlight_power(true);
     hal_uart_puts("wake\n");
     /* Keys queued before sleeping are stale */
     kernel_event_t stale;
@@ -118,6 +141,20 @@ void task_input(void) {
 void task_display(void) {
     display_update();
     scheduler_sleep(1);
+}
+
+/* Battery, charger and USB power, every BATTERY_POLL_MS: updates the
+ * LED and the home screen's battery symbol */
+static void battery_check(void) {
+    static uint32_t last;
+    static battery_level_t prev = BAT_FULL;
+    if (g_tick_ms - last < BATTERY_POLL_MS) return;
+    last = g_tick_ms;
+    if (!battery_poll()) return;
+    if (battery_level() == BAT_EMPTY && prev != BAT_EMPTY && !battery_usb_powered())
+        hal_uart_puts("battery: nearly empty\n");
+    prev = battery_level();
+    if (g_kernel.app_state == APP_HOME) home_draw_status();
 }
 
 /* App dispatch */
@@ -151,6 +188,7 @@ void task_shell(void) {
         kernel_set_app(g_kernel.app_state);
     }
     usb_cdc_process();
+    battery_check();
     scheduler_sleep(1);
 }
 

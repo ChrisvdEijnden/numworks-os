@@ -30,7 +30,6 @@ static bool    s_ready = false;
 #define LCD_DATA (*(volatile uint16_t *)0x60020000UL)
 
 /* ST7789V commands (datasheet table 18) */
-#define CMD_SWRESET 0x01
 #define CMD_RDDID   0x04
 #define CMD_SLPIN   0x10
 #define CMD_SLPOUT  0x11
@@ -49,10 +48,12 @@ static void lcd_data8(uint8_t d) { LCD_DATA = d; }
 
 /* ── FMC (memory bus) ─────────────────────────────────────────────
  * Bank 1 as asynchronous SRAM, 16 bits, separate read and write
- * timings (mode A). HCLK is 216 MHz, 4.63 ns per cycle. ST7789V
- * 8080 timing (datasheet table 4): write cycle >= 66 ns, WRX low and
- * high >= 15 ns, CS setup >= 15 ns; frame-memory read: RDX low
- * >= 355 ns. */
+ * timings (mode A). HCLK is 192 MHz, 5.21 ns per cycle. ST7789V 8080
+ * timing (datasheet table 4): write cycle >= 66 ns, WRX low >= 15 ns;
+ * frame-memory read cycle >= 450 ns, RDX low >= 355 ns. Each pulse
+ * gets ~15 ns extra for the signal edges.
+ *   write: ADDSET 6 + DATAST 6 (31 ns low) + 1 = 13 cycles = 68 ns
+ *   read:  ADDSET 15 + DATAST 72 (375 ns low) = 87 cycles = 453 ns */
 #define FMC_BCR1   (*(volatile uint32_t *)0xA0000000UL)
 #define FMC_BTR1   (*(volatile uint32_t *)0xA0000004UL)
 #define FMC_BWTR1  (*(volatile uint32_t *)0xA0000104UL)
@@ -67,9 +68,9 @@ static void lcd_data8(uint8_t d) { LCD_DATA = d; }
 #define BCR_EXTMOD (1U << 14)
 #define TIMING(addset, datast, busturn) \
     ((uint32_t)(addset) | ((uint32_t)(datast) << 8) | ((uint32_t)(busturn) << 16))
+_Static_assert(SYSCLK_HZ == 192000000UL, "FMC timings below are for HCLK = 192 MHz");
 
-/* The FMC pins of the STM32F730 in LQFP100 (AF12): D0-D15, NOE, NWE,
- * NE1 and A16. Set up only if the bootloader hasn't already. */
+/* The FMC pins (AF12): D0-D15, NOE, NWE, NE1 and A16 */
 static const struct { uint8_t port; uint8_t pin; } FMC_PINS[] = {
     {3,14},{3,15},{3,0},{3,1},{4,7},{4,8},{4,9},{4,10},          /* D0-D7  */
     {4,11},{4,12},{4,13},{4,14},{4,15},{3,8},{3,9},{3,10},       /* D8-D15 */
@@ -80,30 +81,26 @@ static GPIO_TypeDef *gpio_port(uint8_t n) {
     return (GPIO_TypeDef *)(AHB1_BASE + 0x400UL * n);
 }
 
+/* While the panel is unpowered the bus pins are parked (analog), so
+ * they can't feed it through its inputs */
+static void fmc_pins(bool on) {
+    for (unsigned i = 0; i < sizeof(FMC_PINS) / sizeof(FMC_PINS[0]); i++) {
+        GPIO_TypeDef *p = gpio_port(FMC_PINS[i].port);
+        if (on) gpio_af(p, FMC_PINS[i].pin, 12U, 2U);
+        else    gpio_analog(p, FMC_PINS[i].pin);
+    }
+}
+
 static void fmc_init(void) {
     RCC->AHB3ENR |= (1U << 0);                       /* FMCEN */
-    RCC->AHB1ENR |= (1U << 3) | (1U << 4);           /* GPIOD, GPIOE */
+    RCC->AHB1ENR |= (1U << 1) | (1U << 2) | (1U << 3) | (1U << 4);  /* GPIOB-E */
     (void)RCC->AHB1ENR;
-
-    unsigned configured = 0;
-    for (unsigned i = 0; i < sizeof(FMC_PINS) / sizeof(FMC_PINS[0]); i++)
-        if (gpio_pin_is_af(gpio_port(FMC_PINS[i].port), FMC_PINS[i].pin)) configured++;
-    if (configured == 0) {
-        hal_uart_puts("lcd: setting up the FMC pins\n");
-        for (unsigned i = 0; i < sizeof(FMC_PINS) / sizeof(FMC_PINS[0]); i++) {
-            GPIO_TypeDef *p = gpio_port(FMC_PINS[i].port);
-            uint32_t pin = FMC_PINS[i].pin;
-            p->AFR[pin >> 3] = (p->AFR[pin >> 3] & ~(0xFU << ((pin & 7) * 4))) |
-                               (12U << ((pin & 7) * 4));
-            p->OSPEEDR |= 3U << (pin * 2);               /* very high speed */
-            p->MODER = (p->MODER & ~(3U << (pin * 2))) | (2U << (pin * 2));
-        }
-    }
+    fmc_pins(true);
 
     FMC_BCR1 = (FMC_BCR1 & ~(BCR_MUXEN | BCR_MTYP | BCR_MWID | BCR_FACCEN | BCR_WAITEN))
              | BCR_MBKEN | BCR_MWID16 | BCR_WREN | BCR_EXTMOD;
-    FMC_BTR1  = TIMING(15, 80, 5);     /* reads: RDX low 370 ns */
-    FMC_BWTR1 = TIMING(4, 7, 3);       /* writes: 15 cycles = 69 ns */
+    FMC_BTR1  = TIMING(15, 72, 0);     /* reads */
+    FMC_BWTR1 = TIMING(6, 6, 0);       /* writes */
 }
 
 /* ── Controller ───────────────────────────────────────────────── */
@@ -117,7 +114,10 @@ static void lcd_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
     lcd_cmd(CMD_RAMWR);
 }
 
-/* RDDID: a dummy read, then ID1-ID3 (85h 85h 52h on an ST7789V) */
+/* RDDID: a dummy read, then ID1-ID3. The panels in NumWorks
+ * calculators report 4E xx xx (4E 41 01 and 4E 48 01 are known); a
+ * bare ST7789V reports 85 85 52. All 00 or all FF means nothing
+ * answered: check the FMC set-up and the panel's power. */
 static void log_display_id(void) {
     lcd_cmd(CMD_RDDID);
     (void)LCD_DATA;
@@ -132,8 +132,10 @@ static void log_display_id(void) {
     }
     *p = 0;
     hal_uart_puts(msg);
-    hal_uart_puts(id[0] == 0x85 && id[1] == 0x85 && id[2] == 0x52 ? "(ST7789V)\n"
-                                                                     : "(not an ST7789V?)\n");
+    bool none = (id[0] | id[1] | id[2]) == 0 || (id[0] & id[1] & id[2]) == 0xFF;
+    hal_uart_puts(id[0] == 0x4E ? "(NumWorks panel)\n" :
+                  id[0] == 0x85 && id[1] == 0x85 && id[2] == 0x52 ? "(ST7789V)\n" :
+                  none ? "(no answer)\n" : "(unknown panel)\n");
 }
 
 static void mark_all(void) {
@@ -141,11 +143,19 @@ static void mark_all(void) {
     s_x0 = 0; s_y0 = 0; s_x1 = LCD_WIDTH - 1; s_y1 = LCD_HEIGHT - 1;
 }
 
-void display_init(void) {
-    fmc_init();
-    /* Software reset: 5 ms before the next command, 120 ms before
-     * sleep out if the panel was awake (datasheet 9.1.2) */
-    lcd_cmd(CMD_SWRESET);
+/* Power the panel up, reset it and set it up (datasheet 7.4.5, 9.1).
+ * Also used after sleep, when the panel was powered down. */
+static void panel_start(void) {
+    gpio_output(LCD_EXTC_PORT, LCD_EXTC_PIN, true);
+    gpio_input(LCD_TE_PORT, LCD_TE_PIN, GPIO_PULL_NONE);
+    gpio_output(LCD_RESET_PORT, LCD_RESET_PIN, true);
+    gpio_output(LCD_POWER_PORT, LCD_POWER_PIN, true);
+    hal_delay_ms(1);
+    /* Hardware reset: RESX low >= 10 us, then 120 ms before commands
+     * (the reset may have caught the panel out of sleep) */
+    gpio_write(LCD_RESET_PORT, LCD_RESET_PIN, false);
+    hal_delay_ms(1);
+    gpio_write(LCD_RESET_PORT, LCD_RESET_PIN, true);
     hal_delay_ms(120);
     log_display_id();
     lcd_cmd(CMD_SLPOUT);
@@ -156,7 +166,11 @@ void display_init(void) {
     lcd_cmd(CMD_INVON);
 #endif
     lcd_cmd(CMD_DISPON);
+}
 
+void display_init(void) {
+    fmc_init();
+    panel_start();
     memset(g_framebuf, 0x00, sizeof(g_framebuf));
     mark_all();
     display_flush();
@@ -165,20 +179,28 @@ void display_init(void) {
 
 bool display_ready(void) { return s_ready; }
 
-/* Panel sleep and back (datasheet 9.1.11/12). The backlight stays on:
- * its control pin hasn't been checked against a schematic yet. */
+/* Off: display off, sleep in, then cut the panel's power. On: the
+ * panel is set up again and the framebuffer resent. The backlight is
+ * switched separately (hal/backlight.c). */
 void display_power(bool on) {
     if (on) {
-        lcd_cmd(CMD_SLPOUT);
-        hal_delay_ms(120);                     /* also the minimum before the next SLPIN */
-        lcd_cmd(CMD_DISPON);
+        fmc_pins(true);
+        panel_start();
         mark_all();
         display_flush();
     } else {
         lcd_cmd(CMD_DISPOFF);
         lcd_cmd(CMD_SLPIN);
-        hal_delay_ms(5);
+        hal_delay_ms(5);                       /* sleep-in takes 5 ms (9.1.11) */
+        fmc_pins(false);
+        gpio_write(LCD_RESET_PORT, LCD_RESET_PIN, false);
+        gpio_write(LCD_POWER_PORT, LCD_POWER_PIN, false);
     }
+}
+
+uint16_t display_get_pixel(int16_t x, int16_t y) {
+    if (x < 0 || y < 0 || x >= LCD_WIDTH || y >= LCD_HEIGHT) return 0;
+    return FB_PIX(x, y);
 }
 
 /* Send the part drawn since the last flush */

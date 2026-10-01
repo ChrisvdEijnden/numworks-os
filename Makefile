@@ -1,6 +1,6 @@
 # ================================================================
-# NumWorks OS — Build System (N0120 Custom Firmware)
-# Target: STM32F730V8T6 (NumWorks N0120)
+# NumWorks OS — Build System (custom firmware for the NumWorks N0110)
+# Target: STM32F730V8T6 (NumWorks N0110; the N0120 has an STM32H7)
 # Toolchain: arm-none-eabi-gcc
 # ================================================================
 
@@ -33,9 +33,10 @@ SRCS_C := \
     hal/display.c \
     hal/keyboard.c \
     hal/uart.c \
-    hal/timer.c \
     hal/syscalls.c \
     hal/led.c \
+    hal/backlight.c \
+    hal/battery.c \
     hal/fault.c \
     hal/clocks.c \
     fs/flashfs.c \
@@ -47,7 +48,9 @@ SRCS_C := \
     ui/filemanager.c \
     ui/line_input.c \
     ui/font.c \
+    ui/battery_icon.c \
     usb/usb_cdc.c \
+    usb/usb_device.c \
     usb/usb_host.c \
     micropython-port/mp_port.c \
     apps/common/expr.c \
@@ -172,7 +175,9 @@ MP_GLUE_SRCS := micropython-port/modules/nwos/moddisplay.c \
                 micropython-port/modules/nwos/nwos_open.c \
                 micropython-port/modules/nwos/modtime.c \
                 micropython-port/modules/nwos/modrandom.c \
-                micropython-port/modules/nwos/modos.c
+                micropython-port/modules/nwos/modos.c \
+                micropython-port/modules/nwos/modkandinsky.c \
+                micropython-port/modules/nwos/modion.c
 SRCS_C += $(MP_CORE_SRCS) $(MP_GLUE_SRCS)
 OBJS   += $(patsubst %.c,$(BUILD)/%.o,$(MP_CORE_SRCS) $(MP_GLUE_SRCS))
 
@@ -240,8 +245,8 @@ mp:
 
 # ── Flash methods ─────────────────────────────────────────────────
 
-# Via Phi bootloader (recommended for N0120)
-# Connect USB-C, hold RESET, then run:
+# Via the Phi bootloader (written for the N0110); needs a linker script
+# for 0x08040000 (see docs/BUILD.md)
 phi: $(BUILD)/$(TARGET).bin
 	$(call check_link_addr,0x08040000)
 	@echo "Flashing via Phi bootloader at 0x08040000 ..."
@@ -263,16 +268,20 @@ openocd: $(BUILD)/$(TARGET).bin
 	    -c "reset run; exit"
 
 # Writes over the stock firmware at the start of the external flash.
+# The image does not start by itself: the code in the internal flash
+# has to jump to its vector table (docs/BUILD.md, "Boot chain").
 flash: $(BUILD)/$(TARGET).bin
 	$(call check_link_addr,0x90000000)
 	@if [ "$(CONFIRM)" != "overwrite-stock-firmware" ]; then \
 	  echo "This overwrites the stock NumWorks firmware at 0x90000000. Only"; \
 	  echo "NumWorks' own recovery can bring it back (see docs/BUILD.md,"; \
 	  echo "'Restore Official Firmware')."; \
+	  echo "It will NOT boot with NumWorks' code in the internal flash: that"; \
+	  echo "code doesn't jump to this image (docs/BUILD.md, 'Boot chain')."; \
 	  echo "To go ahead anyway: make flash CONFIRM=overwrite-stock-firmware"; \
 	  exit 1; \
 	fi
-	@echo "Flashing to N0120 QSPI via rescue mode..."
+	@echo "Flashing to the N0110's QSPI flash via rescue mode..."
 	@echo "Calculator must show numworks.com/rescue screen."
 	dfu-util -d 0483:a291 -a 0 -s 0x90000000:leave -D $(BUILD)/$(TARGET).bin
 
@@ -291,7 +300,7 @@ distclean: clean
 help:
 	@echo "Targets:"
 	@echo "  all      - Build firmware"
-	@echo "  phi      - Flash via Phi bootloader (N0120)"
+	@echo "  phi      - Flash via Phi bootloader (N0110)"
 	@echo "  delta    - Flash via Delta bootloader"
 	@echo "  openocd  - Flash via ST-Link (dev)"
 	@echo "  flash    - Overwrite stock firmware in QSPI (needs CONFIRM=...)"

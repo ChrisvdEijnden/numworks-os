@@ -4,30 +4,52 @@
 
 | Item | Detail |
 |------|--------|
-| MCU | STM32F730V8T6 — Cortex-M7 @ 216 MHz, single-precision FPU |
+| MCU | STM32F730V8T6 — Cortex-M7, run at 192 MHz, single-precision FPU |
 | Flash | 64 KB internal (bootloader) + 8 MB external QSPI (AT25SF641): code and files |
 | RAM | 256 KB in total: 64 KB DTCM @ 0x2000_0000, 176 KB SRAM1, 16 KB SRAM2 |
 | Display | 320×240, ST7789V controller on a 16-bit 8080 bus through FMC bank 1 (0x6000_0000) |
 | Input | 9×6 key matrix, NumWorks' 46-key layout |
-| USB | OTG_FS (PA11/PA12) |
-| Power | Li-ion battery, RT9526A linear charger |
+| USB | OTG_FS (PA11/PA12), VBUS sensed on PA9; ESD protection USBLC6-2 |
+| Power | Li-ion battery, RT9526A linear charger, battery voltage on an ADC |
 
 **The NumWorks N0120 is a different machine.** Its stock firmware uses RAM
 at 0x2400_0000 (STM32H7 AXI-SRAM), which the F730 doesn't have. Running
 on an N0120 means porting the register definitions, clocks, flash, GPIO
 and memory map to the STM32H7 using the N0120 schematic.
 
-Not yet verified against a schematic: the keyboard row/column pins, the
-LCD (reset, backlight, mirroring), the LED and the charger status pins.
-The LED driver (`hal/led.c`) stays off until its pins are set in
-`include/config.h`; if the picture comes out mirrored or with red and
-blue swapped, change `LCD_MADCTL` there (see *Display*).
+### Board pins (N0110)
+
+The pins come from the board configuration NumWorks published with
+Epsilon 15.5 (`ion/src/device/n0110/drivers/config/` in
+github.com/numworks/epsilon; only facts are taken from it, no code).
+They are collected in `include/config.h`.
+
+| Function | Pins |
+|----------|------|
+| Keyboard rows A–I (open drain) | PA1, PA0, PA2–PA8 |
+| Keyboard columns 1–6 (pull-up) | PC0–PC5 |
+| LCD bus (FMC, AF12) | PD0/1/4/5/7–11/14/15, PE7–PE15 |
+| LCD power / reset / EXTC / TE | PC8 / PE1 / PD6 / PB11 |
+| Backlight | PE0 |
+| RGB LED (TIM3 CH1–3, AF2) | PB4 red, PB5 green, PB0 blue |
+| Battery voltage ÷ 2 (ADC1 ch 9) | PB1 |
+| Charger CHG (low = charging) | PE3 |
+| USB D− / D+ / VBUS | PA11 / PA12 / PA9 |
+| QSPI flash (set up by the bootloader) | PB2, PB6, PC9, PD12, PD13, PE2 |
+| Debug console (USART6, AF8) | PC6 TX, PC7 RX |
+
+Earlier versions of this OS guessed some of these, and the guesses were
+wrong in ways that matter: keyboard rows on PB0–PB2 (the blue LED, the
+battery sense input and the QSPI clock), the console on PA9 (USB VBUS)
+and the LED on PE3 (the charger's output). Nothing has run on real
+hardware yet; if the picture comes out mirrored, or with red and blue
+swapped, change `LCD_MADCTL` in `include/config.h`.
 
 ## Memory map
 
 ```
 QSPI flash (XIP)   0x9000_0000  vector table, code, read-only data
-                                (~95 KB; ~200 KB with MicroPython;
+                                (~100 KB; ~210 KB with MicroPython;
                                 the linker allows 8 MB − 256 KB)
                    0x907C_0000  file system, 2 × 128 KB (last 256 KB)
 
@@ -57,17 +79,24 @@ our vector table, disables interrupts a bootloader left enabled, copies
 
 1. MemManage, BusFault and UsageFault are enabled as separate
    exceptions (otherwise they all arrive as HardFault);
-2. clocks: switch to HSI, set up the PLL (8 MHz HSE, or HSI if the
-   crystal doesn't start), enable over-drive, switch to 216 MHz;
+2. clocks (`hal/clocks.c`): switch to HSI, set up the PLL (8 MHz HSE,
+   or HSI if the crystal doesn't start), enable over-drive, switch to
+   192 MHz. That is what NumWorks' firmware uses, and not the F730's
+   216 MHz maximum, because the QSPI flash we run from is clocked at
+   HCLK/2: 216 MHz would put it at 108 MHz, over the AT25SF641's
+   104 MHz. 192 MHz also gives USB an exact 48 MHz (PLLQ = 8). APB1
+   runs at 48 MHz, APB2 at 96 MHz;
+   the cycle counter (DWT) is started for `hal_delay_us()`;
 3. MPU: the LCD bus at 0x6000_0000 becomes Device memory; region 7
    (no access) is reserved for the QSPI window while it is being
    written (see *Storage*);
 4. I-cache on (code runs from QSPI); D-cache stays off;
 5. SysTick at 1 kHz.
 
-`main()` then starts the UART, the watchdog, the LCD, keyboard, timer,
-LED, kernel, file system, USB (device side) and MicroPython, shows the
-splash and opens the home screen (or the shell, if HOME is held).
+`main()` then starts the UART, the watchdog, the LCD and its backlight,
+keyboard, LED, battery monitor, kernel, file system, USB and
+MicroPython, shows the splash and opens the home screen (or the shell,
+if HOME is held).
 
 If the file system isn't there (first boot, or the area was damaged),
 the calculator asks before formatting: **OK** formats, **BACK** carries
@@ -75,15 +104,16 @@ on without files. If the flash itself isn't usable (unexpected JEDEC
 ID, write protection, QSPI not set up by the bootloader), the reason is
 shown and logged and the system runs without files.
 
-The debug UART (USART1, 115200 8N1) logs the reset cause (power-on,
+The debug UART (USART6 on PC6/PC7, 115200 8N1) logs the reset cause (power-on,
 reset pin, watchdog, software), whether the crystal started, and each
 boot stage with a timestamp:
 
 ```
 NumWorks OS v0.2 booting...
 reset cause: power on / brown-out
-clock: 216 MHz from HSE
-[boot    12 ms] display
+clock: 192 MHz from HSE
+lcd: id 4E 41 01 (NumWorks panel)
+[boot   140 ms] display
 ...
 [boot  1890 ms] apps; starting event loop
 ```
@@ -115,7 +145,8 @@ A cooperative scheduler with four tasks:
 ```
 input    scan the keyboard (every 5 ms), queue events
 display  push the changed rectangle of the framebuffer to the LCD
-app      hand events to the current app, run its tick(), USB protocol
+app      hand events to the current app, run its tick(), USB protocol,
+         battery check (every 2 s)
 idle     WFI until the next interrupt
 ```
 
@@ -124,11 +155,15 @@ task puts the CPU to sleep. Interrupts are masked around the check, so
 a wake-up can't be lost.
 
 **Sleep.** ON/OFF, or `AUTO_SLEEP_MS` (5 minutes) without a key press,
-puts the LCD to sleep and slows SysTick to one tick per 20 ms, so the
-CPU wakes 50 times a second instead of 1000. Only the keyboard and the
-PC transfer protocol are serviced; ON/OFF wakes up and the app is
-redrawn. The LED is switched off and gets its colour back on wake-up.
-The backlight stays on until its control pin is known.
+switches the backlight off, powers the panel down (its bus pins parked)
+and slows SysTick to one tick per 20 ms, so the CPU wakes 50 times a
+second instead of 1000. Without USB power the core also drops to 16 MHz
+on the internal oscillator, with the PLL, the crystal and over-drive
+off; with USB power the clocks stay up so a PC transfer keeps working.
+The LED only shows the charge state while asleep. ON/OFF wakes up: the
+clocks come back, the panel is set up again and the app is redrawn.
+(Stop mode would save more, but the watchdog keeps running in Stop
+mode and would reset the calculator.)
 
 Apps implement `init()`, `redraw()` and `handle_event()`. Tetris (gravity)
 and the shell (UART input) also have a `tick()`. The kernel calls it
@@ -137,11 +172,15 @@ every loop while the app is shown.
 ## Keyboard
 
 The matrix follows NumWorks' own key order (Epsilon's `ion::Keyboard::Key`,
-index = row × 6 + column). Rows are open-drain outputs and columns are
-inputs with pull-ups. A key must read the same on two scans 5 ms apart.
-Arrows and backspace repeat after 500 ms, every 100 ms. Pins already
-owned by another peripheral (alternate-function mode, e.g. the QSPI
-clock on PB2) are left alone.
+index = row × 6 + column). Rows (PA1, PA0, PA2–PA8) are open-drain
+outputs and columns (PC0–PC5) inputs with pull-ups. After driving a
+row the driver waits 100 µs for the columns to settle, as NumWorks'
+firmware does. While no key is down, one read with all rows driven
+tells whether anything was pressed, so an idle keyboard costs 100 µs
+per scan instead of 900. A key must read the same on two scans 5 ms
+apart. Arrows and backspace repeat after 500 ms, every 100 ms. A row
+or column pin that another peripheral already owns is left alone and
+logged.
 
 `key_to_char()` maps keys to characters: ALPHA gives the letters printed
 on the keys, and SHIFT gives `[ ] { } = _ < > #`. The math apps use
@@ -151,16 +190,26 @@ on the keys, and SHIFT gives `[ ] { } = _ < > #`. The math apps use
 
 `hal/display.c` drives the ST7789V through FMC bank 1: writes to
 0x6000_0000 are commands, writes with address line A16 set are data
-(D/CX). The bus timings come from the ST7789V's 8080 write cycle
-(66 ns minimum; we use about 69 ns). If the bootloader already set up
-the FMC pins they are left as they are, otherwise they are configured
-as alternate function 12.
+(D/CX). The bus timings come from the ST7789V's 8080 cycle at 192 MHz:
+writes take 13 HCLK cycles (68 ns; at least 66 ns), reads 87 (453 ns;
+at least 450 ns).
 
-Start-up follows the datasheet: software reset, wait 120 ms, sleep
-out, wait, 16-bit colour (`COLMOD 0x55`), `MADCTL` from
-`LCD_MADCTL`, display on. The controller's ID (`RDDID`, 85 85 52 for an
-ST7789V) is written to the UART log, which tells whether the bus works
-at all.
+Start-up: the panel's power (PC8) on, EXTC (PD6) high, a hardware
+reset on RESX (PE1), 120 ms, then sleep out, 16-bit colour
+(`COLMOD 0x55`), `MADCTL` from `LCD_MADCTL` (0xA0, NumWorks' landscape
+setting), inversion on (the N0110's panels need it), display on. The
+controller's ID (`RDDID`) goes to the UART log: NumWorks' panels answer
+4E xx xx (4E 41 01 and 4E 48 01 are known), a bare ST7789V 85 85 52,
+and all 00 or FF means nothing answered. NumWorks loads a gamma curve
+for some panels; we don't, so colours may look slightly different.
+While asleep the panel is powered down and its bus pins are parked, so
+nothing feeds it through its inputs.
+
+**Backlight** (`hal/backlight.c`, PE0): the driver chip switches on at
+its brightest level when the pin goes high; each 20 µs low pulse steps
+one level down, wrapping from the dimmest to the brightest, and a few
+milliseconds low switch it off. It can't be read back, so the driver
+counts. 16 levels, set in Settings (default 12).
 
 Drawing goes into a RAM framebuffer. Every drawing call grows a
 *dirty rectangle*, and `display_flush()` only sends that window
@@ -251,9 +300,16 @@ Configuration is in `micropython-port/mpconfigport.h`:
   `ticks_add`, `ticks_diff`, and `time()` / `monotonic()` counting from
   power-on (there is no clock);
 - `random`: `seed`, `random`, `uniform`, `randint`, `randrange`,
-  `choice`, `getrandbits`.
+  `choice`, `getrandbits`;
+- `kandinsky` and `ion`, the drawing and keyboard modules of NumWorks'
+  own Python, so scripts written for the stock firmware run:
+  `fill_rect`, `set_pixel`, `get_pixel`, `draw_string` (black on white
+  by default), `color`; colours are `(r, g, b)`, names like `"red"` or
+  `"#rrggbb"`. `ion.keydown(ion.KEY_OK)` is true while the key is held;
+  the `KEY_*` numbers are NumWorks'. The canvas is the whole 320×240
+  screen (NumWorks' is 320×222, under its status bar).
 
-`time`, `random` and `os` are our own modules in `modules/nwos/` (`random`
+`time`, `random`, `os`, `kandinsky` and `ion` are our own modules in `modules/nwos/` (`random`
 is adapted from MicroPython's), because the embed port doesn't ship
 MicroPython's `extmod`. For the same reason
 `micropython-port/shared/readline/readline.h` stands in for
@@ -300,10 +356,12 @@ files again.
 | `echo <text>` | Print text |
 | `run <file.py>` | Run a Python script |
 | `mem` | Stack peak, C heap, Python heap and flash usage |
+| `bat` | Battery voltage and level, USB power, charging |
 | `fm` | Open the file manager |
 | `reboot` | Reset |
 
-The shell also reads commands from the debug UART (USART1, 115200 8N1).
+The shell also reads commands from the debug UART (USART6 on PC6/PC7,
+115200 8N1).
 
 ## PC file transfer protocol
 
@@ -317,6 +375,38 @@ DEL <name>         -> "OK"
 failures           -> "ERR <reason>"
 ```
 
-`usb/usb_cdc.c` implements it on two ring buffers; a USB device stack
-fills and drains them with `usb_cdc_rx_push()` / `usb_cdc_tx_pop()`.
-That stack doesn't exist yet. The PC side is `tools/upload.py`.
+`usb/usb_cdc.c` implements it on two ring buffers, which the USB device
+stack fills and drains. The PC side is `tools/upload.py`.
+
+## USB
+
+`usb/usb_device.c` runs the OTG_FS core as a full-speed CDC-ACM device,
+so the calculator appears as a serial port (`/dev/ttyACM0`, `COMx`) with
+no driver to install. Endpoints: EP0 control, EP1 bulk in/out (64-byte
+packets), EP2 interrupt in (declared, unused). The core stays
+soft-disconnected until VBUS is present on PA9.
+
+Interrupts do the work. SETUP packets are handled when the core reports
+the SETUP stage done; bulk OUT packets go straight into the receive
+ring, and EP1 OUT is only re-armed while the ring has room for a whole
+packet, so a fast PC is NAKed instead of losing data. A reply that ends
+exactly on a 64-byte packet is followed by a zero-length packet, or the
+PC would keep waiting for more.
+
+VID:PID is 1209:0001, pid.codes' open-source vendor ID with its test
+product ID: fine for development, but a PID of our own should be
+requested from pid.codes before builds are distributed.
+
+## Battery, charger, LED
+
+`hal/battery.c` measures the battery through a 1:2 divider on PB1
+(ADC1 channel 9, 2.8 V reference, 8 samples averaged) and reads the
+RT9526A's CHG output on PE3 (low while charging) and VBUS on PA9. The
+level uses NumWorks' thresholds, 3.62/3.7/3.8 V with 20 mV hysteresis.
+The kernel checks every 2 seconds: the home screen shows a battery
+symbol (with a bolt while charging) and warns when it's nearly empty.
+
+The RGB LED is driven by TIM3 in PWM mode on PB4/PB5/PB0 (high = lit,
+4.8 kHz, at most a quarter duty). With USB power it shows the charge
+state (orange: charging, green: full) instead of the colour chosen in
+Settings, also while asleep.

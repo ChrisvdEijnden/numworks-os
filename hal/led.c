@@ -2,86 +2,84 @@
  * NumWorks OS — RGB status LED
  * File: hal/led.c
  *
- * LTST-S310F2KT: common anode (pin 4), cathodes R/G/B on pins 1/2/3.
- * A colour lights when its cathode is pulled LOW, so the pins are
- * driven low for "on" and high for "off". White is all three. (Green
- * and blue need up to 3.8 V forward voltage, so they may be dim if the
- * anode is at 3.3 V.)
- *
- * Disabled until LED_CONFIGURED is set in include/config.h with the
- * board's real pins: driving a wrong pin can fight another chip.
+ * Red, green and blue are driven by TIM3 channels 1-3 in PWM mode on
+ * PB4, PB5 and PB0 (alternate function 2), as in NumWorks' N0110
+ * board configuration; a channel lights while its output is high.
+ * PWM lets each colour be dimmed: the LED is very bright at full duty.
  * ================================================================ */
 #include "led.h"
-#include "uart.h"
 #include "../include/stm32f730.h"
 #include "../include/config.h"
 
-#if LED_CONFIGURED
+/* TIM3 counts at 2 x APB1 = 96 MHz; 20000 steps = 4.8 kHz, no flicker */
+#define PWM_STEPS 20000U
+#define CCMR_PWM1 6U              /* OCxM = 110: high while CNT < CCRx */
+#define CCMR_PE   (1U << 3)       /* OCxPE: preload CCRx */
 
-#if !defined(LED_R_PORT_NUM) || !defined(LED_R_PIN) || !defined(LED_G_PORT_NUM) || \
-    !defined(LED_G_PIN) || !defined(LED_B_PORT_NUM) || !defined(LED_B_PIN)
-#error "LED_CONFIGURED needs LED_{R,G,B}_PORT_NUM and LED_{R,G,B}_PIN in config.h"
-#endif
-
-static const struct { uint8_t port, pin; } PINS[3] = {
-    { LED_R_PORT_NUM, LED_R_PIN }, { LED_G_PORT_NUM, LED_G_PIN }, { LED_B_PORT_NUM, LED_B_PIN },
+typedef struct { uint8_t r, g, b; } rgb_t;
+static const rgb_t COLOURS[LED_COLOUR_COUNT] = {
+    {0, 0, 0}, {255, 0, 0}, {0, 255, 0}, {0, 0, 255}, {255, 255, 255},
 };
-static bool s_ok = false;
-static led_colour_t s_colour = LED_OFF;
-static bool s_suspended = false;
+static const rgb_t CHARGING = {255, 60, 0};     /* orange */
+static const rgb_t FULL     = {0, 255, 0};
 
-static GPIO_TypeDef *port(uint8_t n) {
-    return (GPIO_TypeDef *)(AHB1_BASE + 0x400UL * n);
+static led_colour_t s_colour = LED_OFF;
+static led_charge_t s_charge = LED_CHARGE_NONE;
+static bool s_suspended;
+static bool s_ok;
+
+/* Duty for a 0-255 value; at most a quarter of the period, which is
+ * plenty for an indicator */
+static uint32_t duty(uint8_t v) { return (uint32_t)v * (PWM_STEPS / 4U) / 255U; }
+
+static void show(void) {
+    if (!s_ok) return;
+    rgb_t c = COLOURS[s_colour];
+    if (s_charge == LED_CHARGE_CHARGING) c = CHARGING;
+    else if (s_charge == LED_CHARGE_FULL) c = FULL;
+    else if (s_suspended) c = COLOURS[LED_OFF];
+    TIM3->CCR1 = duty(c.r);
+    TIM3->CCR2 = duty(c.g);
+    TIM3->CCR3 = duty(c.b);
 }
 
 void led_init(void) {
+    RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOBEN;
+    (void)RCC->APB1ENR;
+
+    TIM3->CR1   = 0;
+    TIM3->PSC   = 0;
+    TIM3->ARR   = PWM_STEPS - 1U;
+    TIM3->CCR1  = TIM3->CCR2 = TIM3->CCR3 = 0;
+    TIM3->CCMR1 = (CCMR_PWM1 << 4) | CCMR_PE | (CCMR_PWM1 << 12) | (CCMR_PE << 8);  /* ch1, ch2 */
+    TIM3->CCMR2 = (CCMR_PWM1 << 4) | CCMR_PE;                                       /* ch3 */
+    TIM3->CCER  = (1U << 0) | (1U << 4) | (1U << 8);   /* CC1E CC2E CC3E, active high */
+    TIM3->EGR   = TIM_EGR_UG;                          /* load PSC/ARR/CCRx */
+    TIM3->CR1   = TIM_CR1_ARPE | TIM_CR1_CEN;
+
+    gpio_af(LED_RED_PORT,   LED_RED_PIN,   2U, 0U);
+    gpio_af(LED_GREEN_PORT, LED_GREEN_PIN, 2U, 0U);
+    gpio_af(LED_BLUE_PORT,  LED_BLUE_PIN,  2U, 0U);
     s_ok = true;
-    for (int i = 0; i < 3; i++) {
-        RCC->AHB1ENR |= 1U << PINS[i].port;
-        GPIO_TypeDef *p = port(PINS[i].port);
-        uint32_t pin = PINS[i].pin;
-        if (gpio_pin_is_af(p, pin)) {          /* owned by another peripheral */
-            hal_uart_puts("led: pin owned by another peripheral, LED disabled\n");
-            s_ok = false;
-            return;
-        }
-    }
-    for (int i = 0; i < 3; i++) {
-        GPIO_TypeDef *p = port(PINS[i].port);
-        uint32_t pin = PINS[i].pin;
-        p->BSRR  = 1U << pin;                   /* high = off */
-        p->MODER = (p->MODER & ~(3U << (pin * 2))) | (1U << (pin * 2));
-    }
+    show();
 }
 
 bool led_available(void) { return s_ok; }
 
-static void drive(led_colour_t colour) {
-    static const uint8_t MASK[LED_COLOUR_COUNT] = { 0, 1, 2, 4, 7 };   /* bit 0=R 1=G 2=B */
-    for (int i = 0; i < 3; i++) {
-        uint32_t pin = PINS[i].pin;
-        bool on = MASK[colour] & (1U << i);
-        port(PINS[i].port)->BSRR = on ? (1U << (pin + 16)) : (1U << pin);   /* low = on */
-    }
-}
-
 void led_set(led_colour_t colour) {
-    if (!s_ok || colour >= LED_COLOUR_COUNT) return;
+    if (colour >= LED_COLOUR_COUNT) return;
     s_colour = colour;
-    if (!s_suspended) drive(colour);
+    show();
 }
 
 led_colour_t led_get(void) { return s_colour; }
-void led_suspend(void) { s_suspended = true;  if (s_ok) drive(LED_OFF); }
-void led_resume(void)  { s_suspended = false; if (s_ok) drive(s_colour); }
 
-#else
+void led_set_charge(led_charge_t state) {
+    if (state == s_charge) return;
+    s_charge = state;
+    show();
+}
 
-void led_init(void) {}
-bool led_available(void) { return false; }
-void led_set(led_colour_t colour) { (void)colour; }
-led_colour_t led_get(void) { return LED_OFF; }
-void led_suspend(void) {}
-void led_resume(void) {}
-
-#endif
+void led_suspend(void) { s_suspended = true;  show(); }
+void led_resume(void)  { s_suspended = false; show(); }

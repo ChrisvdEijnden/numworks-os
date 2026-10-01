@@ -8,11 +8,13 @@ manager, a text editor and Tetris.
 > - The code targets the **STM32F730** (the NumWorks N0110 family). The
 >   **NumWorks N0120 uses an STM32H7**, so this firmware does **not** run
 >   on an N0120 yet; that needs a port based on the N0120 schematic.
-> - The keyboard and LCD pin mappings have not been checked against a
->   schematic, and the USB device stack (for PC file transfer) is not
->   written yet.
-> - Nothing here has been tested on a real calculator. Before flashing
->   anything, read *Flashing and recovery* in `docs/BUILD.md`.
+> - The board pins (keyboard, LCD, backlight, LED, battery, USB, debug
+>   UART) follow the N0110 configuration NumWorks published with
+>   Epsilon 15.5.
+> - Nothing here has been tested on a real calculator, and it doesn't
+>   boot by itself yet: NumWorks' code in the internal flash doesn't
+>   jump to it (see *Boot chain* in `docs/BUILD.md`). Read
+>   *Flashing and recovery* there before flashing anything.
 
 ## Features
 
@@ -21,15 +23,15 @@ manager, a text editor and Tetris.
 | **Rekenmachine** | Calculator | Scientific calculator, `Ans`, inverse functions | Works (native evaluator) |
 | **Functies** | Functions | Up to 4 functions: graph (pan/zoom), table; edit/delete | Works |
 | **Vergelijkingen** | Equations | Quadratic, 2×2 linear system, f(x)=0 (Newton) | Works |
-| **Python** | Python REPL | MicroPython: multi-line blocks, `input()`, import your own `.py` files, `math`, `time`, `random`, `os`, `display`, `open()` to read and write files | Needs `make mp` |
+| **Python** | Python REPL | MicroPython: multi-line blocks, `input()`, import your own `.py` files, `math`, `time`, `random`, `os`, `display`, NumWorks' `kandinsky` and `ion`, `open()` to read and write files | Needs `make mp` |
 | **Bestanden** | File manager | Open in editor, new file, delete (SHIFT twice) | Works |
-| **Shell** | Shell | `ls cat touch rm echo run mem fm reboot`; also over UART | Works |
+| **Shell** | Shell | `ls cat touch rm echo run mem bat fm reboot`; also over UART | Works |
 | **Tetris** | Tetris | Classic Tetris | Works |
 | **Docs** | Docs | Built-in reference | Works |
-| **Instellingen** | Settings | RGB LED, version, reboot | LED off until its pins are set in `config.h` |
+| **Instellingen** | Settings | RGB LED, screen brightness, version, reboot | Works |
 | **Foto's** | Photo viewer | 24-bit BMP from a USB drive | Needs USB host + FatFs (missing) |
 | **Editor** | Text editor | Files up to 8 KB, scrolls sideways for long lines, asks a name for new files | Works |
-| PC transfer | `tools/upload.py` | List, upload, download, delete files | Protocol done, USB stack missing |
+| PC transfer | `tools/upload.py` | List, upload, download, delete files over USB (a serial port on the PC) | Works in simulation |
 
 ## Keys
 
@@ -45,9 +47,11 @@ Navigate with the arrow keys, **OK** (or **EXE**) opens or confirms,
   continues on the next line, indented for you; an empty line runs the
   block. **UP** recalls the previous line.
 - In a running Python script, **BACK** raises `KeyboardInterrupt`.
-- **ON/OFF** turns the screen off (and so does 5 minutes without a key
-  press); ON/OFF turns it back on. The backlight pin isn't known yet,
-  so the backlight itself stays on.
+- **ON/OFF** turns the screen and backlight off (and so does 5 minutes
+  without a key press); ON/OFF turns them back on. While it's off the
+  processor slows down to save the battery, unless USB is connected.
+- The home screen shows the battery level, with a bolt while charging;
+  with USB power the LED is orange while charging and green when full.
 - After a crash the screen shows the fault and its address; any key
   restarts. The same report goes to the debug UART. If the calculator
   hangs, the watchdog restarts it after about 8 seconds.
@@ -86,9 +90,10 @@ numworks-os/
 │   └── stm32f730.h             Register definitions
 ├── bootloader/
 │   ├── startup_stm32f730.s     Vector table + Reset_Handler
-│   └── boot.c                  Clocks (216 MHz), MPU, I-cache, SysTick
+│   └── boot.c                  MPU, I-cache, SysTick, cycle counter
 ├── kernel/                     Event loop, scheduler, sleep
-├── hal/                        LCD, keyboard, UART, timer, LED,
+├── hal/                        LCD, backlight, keyboard, UART, LED,
+│                               battery, clocks (192 MHz / 16 MHz),
 │                               crash screen, newlib stubs
 ├── fs/
 │   ├── flashfs.c/h             File system (append-only log, two areas)
@@ -100,14 +105,16 @@ numworks-os/
 │   ├── filemanager.c           File manager
 │   └── line_input.c            Blocking line input (Python's input())
 ├── usb/
-│   ├── usb_cdc.c/h             PC transfer protocol (USB stack missing)
+│   ├── usb_cdc.c/h             PC transfer protocol
+│   ├── usb_device.c/h          USB device stack (CDC-ACM serial port)
 │   └── usb_host.c/h            USB host skeleton (not started at boot)
 ├── micropython-port/
 │   ├── mp_port.c/h             MicroPython glue
 │   ├── mpconfigport.h          MicroPython configuration
 │   ├── micropython_embed.mk    Used by `make mp`
 │   ├── shared/readline/        input() hook (replaces MicroPython's)
-│   └── modules/nwos/           `display`, `time`, `random`, `os`, open()
+│   └── modules/nwos/           `display`, `kandinsky`, `ion`, `time`,
+│                               `random`, `os`, open()
 ├── apps/
 │   ├── common/expr.c/h         Expression evaluator (math apps)
 │   └── <app>/                  One directory per app

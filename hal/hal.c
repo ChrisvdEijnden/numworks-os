@@ -2,7 +2,6 @@
  * are initialised separately by main() to allow splash ordering. */
 #include "hal.h"
 #include "uart.h"
-#include "timer.h"
 #include "display.h"
 #include "keyboard.h"
 #include "../include/stm32f730.h"
@@ -10,6 +9,7 @@
 
 extern volatile uint32_t g_tick_ms;
 extern bool g_boot_hse;
+extern volatile uint32_t g_hclk_hz;
 
 /* RCC_CSR reset flags (RM0431 §5.3.21); RMVF clears them */
 #define RCC_CSR (*(volatile uint32_t *)(RCC_BASE + 0x74UL))
@@ -54,8 +54,8 @@ void hal_init(void) {
     hal_uart_puts("reset cause: ");
     s_wdg_reset = (RCC_CSR & (1U << 29)) != 0;
     hal_uart_puts(reset_cause(RCC_CSR));
-    hal_uart_puts(g_boot_hse ? "\nclock: 216 MHz from HSE\n"
-                             : "\nclock: 216 MHz from HSI (crystal did not start)\n");
+    hal_uart_puts(g_boot_hse ? "\nclock: 192 MHz from HSE\n"
+                             : "\nclock: 192 MHz from HSI (crystal did not start)\n");
     RCC_CSR |= RCC_CSR_RMVF;
 }
 
@@ -97,9 +97,9 @@ void hal_stack_stats(uint32_t *peak, uint32_t *size) {
 void hal_tick_set_period(uint32_t ms) {
     extern volatile uint32_t g_tick_step;
     if (ms < 1) ms = 1;
-    if (ms > 70) ms = 70;                       /* 24-bit reload at 216 MHz */
+    if (ms > 80) ms = 80;                       /* 24-bit reload at 192 MHz */
     SysTick->CTRL &= ~SysTick_CTRL_ENABLE;
-    SysTick->LOAD = (SYSCLK_HZ / 1000U) * ms - 1U;
+    SysTick->LOAD = (g_hclk_hz / 1000U) * ms - 1U;
     SysTick->VAL  = 0;
     g_tick_step   = ms;
     SysTick->CTRL |= SysTick_CTRL_ENABLE;
@@ -113,7 +113,15 @@ uint32_t hal_tick_us(void) {
         val = SysTick->VAL;
     } while (ms != g_tick_ms);                  /* a tick came in between */
     /* SysTick counts CPU cycles down from LOAD */
-    return ms * 1000U + (SysTick->LOAD - val) / (SYSCLK_HZ / 1000000U);
+    return ms * 1000U + (SysTick->LOAD - val) / (g_hclk_hz / 1000000U);
+}
+
+/* Busy-wait on the cycle counter: needs neither SysTick nor
+ * interrupts, so the crash screen can use it too */
+void hal_delay_us(uint32_t us) {
+    uint32_t start = DWT_CYCCNT;
+    uint32_t n = us * (g_hclk_hz / 1000000U);
+    while (DWT_CYCCNT - start < n) {}
 }
 
 uint32_t hal_tick_ms(void) {

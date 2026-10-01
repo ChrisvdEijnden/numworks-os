@@ -7,8 +7,9 @@
     .thumb
 
 /* IRQ numbers (STM32F7 reference manual, vector table) */
-    .equ    IRQ_USART1,   37
     .equ    IRQ_TIM6_DAC, 54
+    .equ    IRQ_OTG_FS,   67
+    .equ    IRQ_USART6,   71
     .equ    IRQ_SLOTS,    240       /* covers every STM32F7 IRQ */
 
     .section .isr_vector,"a",%progbits
@@ -34,15 +35,19 @@ g_vectors:
 
     /* External interrupts — entry N is IRQ N. Handlers we implement
      * are named here so the linker keeps them; the rest are unused. */
-    .rept   IRQ_USART1
-    .word   Default_Handler
-    .endr
-    .word   USART1_IRQHandler                   /* IRQ 37 */
-    .rept   IRQ_TIM6_DAC - IRQ_USART1 - 1
+    .rept   IRQ_TIM6_DAC
     .word   Default_Handler
     .endr
     .word   TIM6_DAC_IRQHandler                 /* IRQ 54 */
-    .rept   IRQ_SLOTS - IRQ_TIM6_DAC - 1
+    .rept   IRQ_OTG_FS - IRQ_TIM6_DAC - 1
+    .word   Default_Handler
+    .endr
+    .word   OTG_FS_IRQHandler                   /* IRQ 67 */
+    .rept   IRQ_USART6 - IRQ_OTG_FS - 1
+    .word   Default_Handler
+    .endr
+    .word   USART6_IRQHandler                   /* IRQ 71 */
+    .rept   IRQ_SLOTS - IRQ_USART6 - 1
     .word   Default_Handler
     .endr
     .size   g_vectors, . - g_vectors
@@ -166,7 +171,8 @@ Ignore_Handler:
     weak_alias DebugMon_Handler,    Ignore_Handler
     weak_alias PendSV_Handler,      Ignore_Handler
     weak_alias SysTick_Handler,     Ignore_Handler
-    weak_alias USART1_IRQHandler,   Default_Handler
     weak_alias TIM6_DAC_IRQHandler, Default_Handler
+    weak_alias OTG_FS_IRQHandler,   Default_Handler
+    weak_alias USART6_IRQHandler,   Default_Handler
 
     .end

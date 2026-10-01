@@ -17,7 +17,8 @@
 
 void display_init(void);
 bool display_ready(void);      /* true once display_init() has run */
-void display_power(bool on);   /* panel sleep; the backlight pin isn't known yet */
+uint16_t display_get_pixel(int16_t x, int16_t y);   /* 0 outside the screen */
+void display_power(bool on);   /* panel off (powered down) / on again */
 void display_flush(void);   /* push the whole framebuffer to the LCD now */
 void display_update(void);  /* push it only if something was drawn since */
 

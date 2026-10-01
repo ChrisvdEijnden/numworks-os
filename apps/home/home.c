@@ -9,6 +9,8 @@
  *   Foto's       | Editor    | [spare]
  * ================================================================ */
 #include "home.h"
+#include "../../hal/battery.h"
+#include "../../ui/battery_icon.h"
 #include "../../hal/display.h"
 #include "../../hal/keyboard.h"
 #include "../../include/config.h"
@@ -61,11 +63,20 @@ static void draw_icon(int i) {
     display_str(ox+PAD+3, oy+IH-14, ITEMS[i].label, fg, bg);
 }
 
+/* Battery symbol, and a warning when it's nearly empty */
+void home_draw_status(void) {
+    bool empty = battery_level() == BAT_EMPTY && !battery_usb_powered();
+    display_fill_rect(110, 0, LCD_WIDTH - 110, HEADER_H, C_HDR);
+    if (empty) display_str(110, 8, "Batterij bijna leeg", RED, C_HDR);
+    else       display_str(LCD_WIDTH - 112, 8, "EXE:Open", RGB(200,220,255), C_HDR);
+    battery_icon_draw(LCD_WIDTH - 8 - BATTERY_ICON_W, 8, C_HDR);
+}
+
 void home_redraw(void) {
     display_fill(C_BG);
     display_fill_rect(0, 0, LCD_WIDTH, HEADER_H, C_HDR);
     display_str(10, 8, "NumWorks OS", WHITE, C_HDR);
-    display_str(LCD_WIDTH-96, 8, "EXE:Open", RGB(200,220,255), C_HDR);
+    home_draw_status();
     for (int i = 0; i < GRID_SZ; i++) draw_icon(i);
 }
 

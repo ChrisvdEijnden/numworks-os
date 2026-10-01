@@ -2,7 +2,8 @@
 
 > This firmware targets the **STM32F730** (NumWorks N0110 family). It does
 > **not** run on the N0120, which has an STM32H7. Nothing has been tested
-> on real hardware yet.
+> on real hardware yet, and it can't start on its own yet: see
+> *Boot chain* below.
 
 ## Prerequisites
 
@@ -63,6 +64,30 @@ The C code is compiled against newlib's own headers (`-std=gnu11`);
 USB drives still won't mount: there is no USB host mass-storage driver
 yet, and the calculator can't power a drive (see *USB notes*).
 
+## Boot chain
+
+How the N0110 starts, from the firmware NumWorks published:
+
+- **Epsilon up to version 15**: the internal flash (64 KB at
+  `0x08000000`) holds Epsilon's own start-up code. It sets up the clocks
+  and the QSPI flash, then calls a function in the external flash at an
+  address fixed when *that* Epsilon was built, not a vector table.
+- **Epsilon 16 and later**: the internal flash holds NumWorks' bootloader,
+  which only starts NumWorks' signed kernel. Third-party software runs as
+  a "userland" on top of that kernel; this OS is a whole kernel, so it
+  can't run that way.
+
+Either way, writing this image to `0x90000000` alone gives a calculator
+that doesn't start: the code in the internal flash jumps somewhere into
+our image, not to our reset handler. What's missing is a small loader in
+the internal flash that sets up the QSPI flash in memory-mapped mode
+(pins PB2, PB6, PC9, PD12, PD13, PE2; see `include/config.h`) and jumps
+to the vector table at `0x90000000`. That loader isn't written yet.
+Replacing the internal flash also removes NumWorks' own code, so before
+doing that, check how your calculator's recovery mode works. Recovering
+from a bad internal flash may need the STM32's built-in bootloader or an
+SWD probe.
+
 ## Flashing and recovery
 
 **Read this before flashing.**
@@ -73,7 +98,8 @@ yet, and the calculator can't power a drive (see *USB notes*).
   file system; the linker refuses images that would overlap it. On the
   first start the calculator asks before formatting it.
 - `make flash` writes it there in rescue mode, **over the stock
-  firmware**. It asks you to confirm:
+  firmware**; on its own that doesn't boot (see *Boot chain*). It asks
+  you to confirm:
 
   ```bash
   make flash CONFIRM=overwrite-stock-firmware
@@ -108,18 +134,26 @@ firmware:
    over USB, and follow the instructions there. If the calculator still
    boots, updating from https://my.numworks.com/devices/upgrade works too.
 
+## Debug UART
+
+The boot log, crash reports and a shell are on USART6: TX on PC6, RX on
+PC7, 115200 8N1, 3.3 V levels. Connect a 3.3 V USB-serial adapter there
+(not 5 V).
+
 ## USB notes
 
-- **PC file transfer** needs a USB device (CDC-ACM) stack, which isn't
-  written yet. The transfer protocol and the PC tools are done and
-  tested against each other.
+- **PC file transfer**: the calculator is a CDC-ACM serial port (no
+  driver needed on Linux, macOS or Windows 10+), VID:PID 1209:0001. The
+  stack and the protocol have been tested together on a simulated USB
+  core, not on a real one yet. 1209:0001 is a pid.codes test ID: request
+  a product ID of our own before distributing builds.
 - **USB drives** can't work as the board is: nothing on it can supply
   5 V on VBUS (the RT9526A is a charger, the USBLC6-2 is ESD
   protection). USB host mode is therefore not started at boot.
 
 ## PC file transfer
 
-Once the USB stack exists:
+With the calculator connected over USB:
 
 ```bash
 python tools/upload.py --port /dev/ttyACM0 list

@@ -9,7 +9,6 @@
 #include "tetris.h"
 #include "../../hal/display.h"
 #include "../../hal/keyboard.h"
-#include "../../hal/timer.h"
 #include "../../hal/hal.h"
 #include "../../include/config.h"
 #include <string.h>
@@ -201,7 +200,7 @@ void tetris_handle_event(const kernel_event_t *ev) {
     uint32_t now = hal_tick_ms();
     /* Key timing is the only entropy we have: mix it into the RNG so
      * every game gets a different piece sequence */
-    s_rng ^= hal_micros();
+    s_rng ^= hal_tick_us();
 
     if (k == KEY_HOME || k == KEY_BACK) { kernel_set_app(APP_HOME); return; }
     if (s_game_over) {
