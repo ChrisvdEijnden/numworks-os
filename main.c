@@ -15,7 +15,6 @@
 #include "shell/shell.h"
 #include "ui/filemanager.h"
 #include "usb/usb_cdc.h"
-#include "usb/usb_host.h"
 #include "micropython-port/mp_port.h"
 #include "apps/home/home.h"
 #include "apps/calculator/calculator.h"
@@ -25,7 +24,6 @@
 #include "apps/tetris/tetris.h"
 #include "apps/docs_app/docs_app.h"
 #include "apps/settings/settings.h"
-#include "apps/photo_viewer/photo_viewer.h"
 #include "apps/text_editor/text_editor.h"
 #include "include/config.h"
 #include <string.h>
@@ -113,7 +111,6 @@ static void app_init_all(void) {
     tetris_init();
     docs_init();
     settings_init();
-    photo_viewer_init();
     text_editor_init();
     shell_init();
 }
@@ -153,17 +150,14 @@ int main(void) {
     /* 4. USB CDC (virtual serial for PC transfer) */
     usb_cdc_init();
 
-    /* 5. USB host mode (for USB drives) is not started: the OTG core is in
-     *    device mode for CDC, and the board can't power a drive on VBUS. */
-
-    /* 6. MicroPython */
+    /* 5. MicroPython */
     mp_init_port();
     hal_boot_log("micropython");
 
-    /* 7. Boot splash */
+    /* 6. Boot splash */
     boot_splash(boot_start);
 
-    /* 8. Init default files */
+    /* 7. Init default files */
     if (!flashfs_exists("welkom.py")) {
         const char *hello =
             "# Welkom bij NumWorks OS!\n"
@@ -174,18 +168,18 @@ int main(void) {
         flashfs_write("welkom.py", hello, (uint32_t)strlen(hello));
     }
 
-    /* 9. Init all app modules */
+    /* 8. Init all app modules */
     app_init_all();
     hal_boot_log("apps; starting event loop");
 
-    /* 10. Start at Home (or Shell if HOME held) */
+    /* 9. Start at Home (or Shell if HOME held) */
     if (home_held_at_boot()) {
         kernel_set_app(APP_SHELL);
     } else {
         kernel_set_app(APP_HOME);
     }
 
-    /* 11. Kernel event loop — never returns */
+    /* 10. Kernel event loop — never returns */
     kernel_run();
 
     return 0;

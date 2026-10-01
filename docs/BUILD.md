@@ -53,17 +53,6 @@ either changed; this version added the `os` module, so run it once).
 The C code is compiled against newlib's own headers (`-std=gnu11`);
 `make print-libs` shows which `libc.a` the build found.
 
-## FatFs (optional, for USB drives)
-
-`fs/ff.c` is a stub. To use the real FatFs:
-
-1. Download FatFs (R0.15 or later) from http://elm-chan.org/fsw/ff/.
-2. Copy `ff.h`, `ff.c` and `ffconf.h` into `fs/` (keep our `diskio.c/h`).
-3. In `fs/ffconf.h`, set `FF_VOLUMES` to `2`: the USB drive is `"1:"`.
-
-USB drives still won't mount: there is no USB host mass-storage driver
-yet, and the calculator can't power a drive (see *USB notes*).
-
 ## Boot chain
 
 How the N0110 starts, from the firmware NumWorks published:
@@ -147,9 +136,10 @@ PC7, 115200 8N1, 3.3 V levels. Connect a 3.3 V USB-serial adapter there
   stack and the protocol have been tested together on a simulated USB
   core, not on a real one yet. 1209:0001 is a pid.codes test ID: request
   a product ID of our own before distributing builds.
-- **USB drives** can't work as the board is: nothing on it can supply
-  5 V on VBUS (the RT9526A is a charger, the USBLC6-2 is ESD
-  protection). USB host mode is therefore not started at boot.
+- **USB drives** aren't supported: nothing on the board can supply 5 V
+  on VBUS (the RT9526A is a charger, the USBLC6-2 is ESD protection),
+  so the USB port only works as a device. Earlier versions had a photo
+  viewer for USB drives and a FatFs stub; both were removed.
 
 ## PC file transfer
 

@@ -29,7 +29,6 @@ manager, a text editor and Tetris.
 | **Tetris** | Tetris | Classic Tetris | Works |
 | **Docs** | Docs | Built-in reference | Works |
 | **Instellingen** | Settings | RGB LED, screen brightness, version, reboot | Works |
-| **Foto's** | Photo viewer | 24-bit BMP from a USB drive | Needs USB host + FatFs (missing) |
 | **Editor** | Text editor | Files up to 8 KB, scrolls sideways for long lines, asks a name for new files | Works |
 | PC transfer | `tools/upload.py` | List, upload, download, delete files over USB (a serial port on the PC) | Works in simulation |
 
@@ -73,7 +72,7 @@ files that were already saved.
 ├──────────────┼──────────────┼──────────────┤
 │   Tetris     │    Docs      │ Instellingen │
 ├──────────────┼──────────────┼──────────────┤
-│   Foto's     │   Editor     │              │
+│   Editor     │              │              │
 └──────────────┴──────────────┴──────────────┘
 ```
 
@@ -97,17 +96,14 @@ numworks-os/
 │                               crash screen, newlib stubs
 ├── fs/
 │   ├── flashfs.c/h             File system (append-only log, two areas)
-│   ├── storage_qspi.c          QSPI flash driver (AT25SF641), runs from RAM
-│   ├── ff.c / ff.h             FatFs stub (replace with real FatFs)
-│   └── diskio.c/h              FatFs drive glue (drive 1 = USB)
+│   └── storage_qspi.c          QSPI flash driver (AT25SF641), runs from RAM
 ├── shell/                      Terminal UI + commands
 ├── ui/
 │   ├── filemanager.c           File manager
 │   └── line_input.c            Blocking line input (Python's input())
 ├── usb/
 │   ├── usb_cdc.c/h             PC transfer protocol
-│   ├── usb_device.c/h          USB device stack (CDC-ACM serial port)
-│   └── usb_host.c/h            USB host skeleton (not started at boot)
+│   └── usb_device.c/h          USB device stack (CDC-ACM serial port)
 ├── micropython-port/
 │   ├── mp_port.c/h             MicroPython glue
 │   ├── mpconfigport.h          MicroPython configuration
@@ -156,8 +152,8 @@ confirmation because it overwrites the stock firmware.
 ## License
 
 The code in this repository is MIT licensed (see `LICENSE`).
-MicroPython (`make mp`) and FatFs keep their own licenses; the `random`
-module is adapted from MicroPython's (MIT).
+MicroPython (`make mp`) keeps its own license (MIT); the `random`
+module is adapted from MicroPython's.
 
 Earlier versions of this repository contained a dump of NumWorks'
 firmware (`epsilon-qspi-backup.bin`). It was removed: it isn't ours to

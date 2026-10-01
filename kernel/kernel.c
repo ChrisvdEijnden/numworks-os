@@ -23,7 +23,6 @@
 #include "../apps/tetris/tetris.h"
 #include "../apps/docs_app/docs_app.h"
 #include "../apps/settings/settings.h"
-#include "../apps/photo_viewer/photo_viewer.h"
 #include "../apps/text_editor/text_editor.h"
 #include <string.h>
 
@@ -172,7 +171,6 @@ void task_shell(void) {
             case APP_TETRIS:       tetris_handle_event(&ev);        break;
             case APP_DOCS:         docs_handle_event(&ev);          break;
             case APP_SETTINGS:     settings_handle_event(&ev);      break;
-            case APP_PHOTO_VIEWER: photo_viewer_handle_event(&ev);  break;
             case APP_TEXT_EDITOR:  text_editor_handle_event(&ev);   break;
             default: break;
         }
@@ -234,7 +232,6 @@ void kernel_set_app(app_state_t app) {
         case APP_TETRIS:       tetris_redraw();            break;
         case APP_DOCS:         docs_redraw();              break;
         case APP_SETTINGS:     settings_redraw();         break;
-        case APP_PHOTO_VIEWER: photo_viewer_redraw();      break;
         case APP_TEXT_EDITOR:  text_editor_redraw();       break;
         default: break;
     }

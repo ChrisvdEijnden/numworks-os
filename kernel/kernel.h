@@ -22,7 +22,6 @@ typedef enum {
     APP_TETRIS,
     APP_DOCS,
     APP_SETTINGS,
-    APP_PHOTO_VIEWER,
     APP_TEXT_EDITOR,
     APP_COUNT
 } app_state_t;

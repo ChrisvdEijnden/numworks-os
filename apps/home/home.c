@@ -6,7 +6,7 @@
  *   Rekenmachine | Functies  | Vergelijkingen
  *   Python       | Bestanden | Shell
  *   Tetris       | Docs      | Instellingen
- *   Foto's       | Editor    | [spare]
+ *   Editor       | [spare]   | [spare]
  * ================================================================ */
 #include "home.h"
 #include "../../hal/battery.h"
@@ -29,7 +29,7 @@
 #define IW       (LCD_WIDTH  / HOME_COLS)
 #define IH       ((LCD_HEIGHT - HEADER_H) / HOME_ROWS)
 #define GRID_SZ  (HOME_COLS * HOME_ROWS)
-#define N_REAL   11
+#define N_REAL   10    /* apps; the remaining slots are empty */
 
 typedef struct { const char *label; app_state_t app; uint16_t dot; } item_t;
 static const item_t ITEMS[GRID_SZ] = {
@@ -42,8 +42,8 @@ static const item_t ITEMS[GRID_SZ] = {
     {"Tetris",       APP_TETRIS,       RGB(255,60,60)  },
     {"Docs",         APP_DOCS,         RGB(120,120,220)},
     {"Instellingen", APP_SETTINGS,     RGB(180,180,180)},
-    {"Foto's",       APP_PHOTO_VIEWER, RGB(255,120,160)},
     {"Editor",       APP_TEXT_EDITOR,  RGB(240,240,140)},
+    {"",             APP_COUNT,        C_ICON          },
     {"",             APP_COUNT,        C_ICON          },
 };
 
@@ -87,9 +87,10 @@ void home_handle_event(const kernel_event_t *ev) {
     key_code_t k = (key_code_t)ev->key;
     int prev = s_cur;
 
-    if      (k == KEY_RIGHT && (s_cur % HOME_COLS) < HOME_COLS-1) s_cur++;
+    if      (k == KEY_RIGHT && (s_cur % HOME_COLS) < HOME_COLS-1 &&
+             s_cur + 1 < N_REAL)                                  s_cur++;
     else if (k == KEY_LEFT  && (s_cur % HOME_COLS) > 0)           s_cur--;
-    else if (k == KEY_DOWN  && s_cur + HOME_COLS < GRID_SZ)       s_cur += HOME_COLS;
+    else if (k == KEY_DOWN  && s_cur + HOME_COLS < N_REAL)        s_cur += HOME_COLS;
     else if (k == KEY_UP    && s_cur - HOME_COLS >= 0)             s_cur -= HOME_COLS;
     else if (key_is_exe(k)) {
         if (s_cur < N_REAL && ITEMS[s_cur].app != APP_COUNT)

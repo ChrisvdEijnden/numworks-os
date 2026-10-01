@@ -41,8 +41,6 @@ SRCS_C := \
     hal/clocks.c \
     fs/flashfs.c \
     fs/storage_qspi.c \
-    fs/ff.c \
-    fs/diskio.c \
     shell/shell.c \
     shell/commands.c \
     ui/filemanager.c \
@@ -51,7 +49,6 @@ SRCS_C := \
     ui/battery_icon.c \
     usb/usb_cdc.c \
     usb/usb_device.c \
-    usb/usb_host.c \
     micropython-port/mp_port.c \
     apps/common/expr.c \
     apps/home/home.c \
@@ -62,7 +59,6 @@ SRCS_C := \
     apps/tetris/tetris.c \
     apps/docs_app/docs_app.c \
     apps/settings/settings.c \
-    apps/photo_viewer/photo_viewer.c \
     apps/text_editor/text_editor.c
 
 SRCS_S := bootloader/startup_stm32f730.s
