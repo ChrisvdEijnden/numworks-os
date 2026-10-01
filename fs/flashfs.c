@@ -44,6 +44,15 @@ static uint32_t    s_gen      = 0;         /* its generation               */
 static bool        s_present  = false;     /* storage found                */
 static bool        s_mounted  = false;
 
+/* A streamed write in progress (flashfs_stream_*): its space is
+ * reserved in the active area; it only becomes a file at the end.
+ * Anything that rebuilds the directory (compaction, remount) ends it. */
+static struct {
+    bool     active;
+    char     name[FFS_NAME_LEN];
+    uint32_t start, size, written;           /* start: region offset */
+} s_stream;
+
 static uint32_t align4(uint32_t v) { return (v + 3U) & ~3U; }
 static uint32_t area_base(uint32_t a) { return a * AREA_SIZE; }
 static const uint8_t *at(uint32_t off) { return storage_base() + off; }
@@ -132,6 +141,7 @@ static int write_super(uint32_t a, uint32_t generation) {
 
 /* ── Mount: pick the newest valid area and replay its log ────── */
 static int mount(void) {
+    s_stream.active = false;
     s_mounted  = false;
     s_count    = 0;
     s_log_used = 0;
@@ -195,7 +205,7 @@ static int log_append(const char *name, uint32_t region_offset,
 }
 
 /* ── Compaction into the other area ───────────────────────────── */
-typedef enum { MOD_WRITE, MOD_DELETE, MOD_RENAME } mod_t;
+typedef enum { MOD_NONE, MOD_WRITE, MOD_DELETE, MOD_RENAME } mod_t;
 
 typedef struct {
     mod_t       mod;
@@ -217,7 +227,7 @@ static int lay_out(uint32_t a, const change_t *c, bool write) {
             nm  = s_dir[i].name;
             src = at(s_dir[i].offset);
             sz  = s_dir[i].size;
-            if (strncmp(nm, c->name, FFS_NAME_LEN) == 0) {
+            if (c->mod != MOD_NONE && strncmp(nm, c->name, FFS_NAME_LEN) == 0) {
                 if (c->mod == MOD_DELETE) continue;
                 if (c->mod == MOD_RENAME) nm = c->new_name;
                 if (c->mod == MOD_WRITE)  { src = c->data; sz = c->len; done = true; }
@@ -351,6 +361,72 @@ int flashfs_rename(const char *from, const char *to) {
     }
     change_t c = { MOD_RENAME, from, to, NULL, 0 };
     return compact(&c);
+}
+
+/* ── Streamed writes ─────────────────────────────────────────────
+ * For files too big to hold in RAM: the data is programmed as it
+ * arrives, into space reserved up front, and the file only changes
+ * when flashfs_stream_end() appends its record. A power cut or an
+ * abort before that leaves the old file (if any) as it was. */
+int flashfs_stream_begin(const char *path, uint32_t size) {
+    if (s_stream.active) return -1;      /* one at a time; the other one goes on */
+    if (!s_mounted || !name_ok(path) || size > FFS_MAX_FILE_SIZE) return -1;
+    if (find_entry(path) < 0 && s_count >= FFS_MAX_FILES) return -1;
+    uint32_t need = align4(size);
+    if (s_log_used >= LOG_RECORDS || need > AREA_SIZE - s_data_end) {
+        change_t none = { MOD_NONE, NULL, NULL, NULL, 0 };    /* make room */
+        if (compact(&none) != 0) return -1;
+        if (s_log_used >= LOG_RECORDS || need > AREA_SIZE - s_data_end) return -1;
+    }
+    strncpy(s_stream.name, path, FFS_NAME_LEN - 1);
+    s_stream.name[FFS_NAME_LEN - 1] = 0;
+    s_stream.start   = area_base(s_area) + s_data_end;
+    s_stream.size    = size;
+    s_stream.written = 0;
+    s_data_end += need;          /* other writes go after the reservation */
+    s_stream.active = true;
+    return 0;
+}
+
+int flashfs_stream_write(const void *data, uint32_t len) {
+    if (!s_stream.active || len > s_stream.size - s_stream.written) return -1;
+    if (prog(s_stream.start + s_stream.written, data, len) != 0) {
+        s_stream.active = false;
+        return -1;
+    }
+    s_stream.written += len;
+    return (int)len;
+}
+
+int flashfs_stream_end(void) {
+    if (!s_stream.active || s_stream.written != s_stream.size) {
+        s_stream.active = false;
+        return -1;
+    }
+    s_stream.active = false;
+    const char *name = s_stream.name;
+    if (find_entry(name) < 0 && s_count >= FFS_MAX_FILES) return -1;
+    if (s_log_used < LOG_RECORDS) {
+        if (log_append(name, s_stream.start, s_stream.size, REC_FILE) != 0) return -1;
+        int idx = find_entry(name);
+        if (idx < 0) idx = (int)s_count++;
+        set_entry(idx, name, s_stream.start, s_stream.size);
+        return (int)s_stream.size;
+    }
+    /* The log filled up meanwhile: compact, copying the streamed data
+     * from where it was programmed */
+    char nm[FFS_NAME_LEN];
+    memcpy(nm, name, FFS_NAME_LEN);
+    change_t c = { MOD_WRITE, nm, NULL, at(s_stream.start), s_stream.size };
+    return compact(&c) == 0 ? (int)c.len : -1;
+}
+
+void flashfs_stream_abort(void) {
+    s_stream.active = false;     /* the reserved space is reclaimed by compaction */
+}
+
+bool flashfs_stream_active(void) {
+    return s_stream.active;
 }
 
 bool flashfs_mounted(void) {

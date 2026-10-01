@@ -86,7 +86,7 @@
 #define FFS_AREA_SIZE       (STORAGE_SIZE / 2U)
 #define FFS_MAX_FILES       32
 #define FFS_NAME_LEN        24
-#define FFS_MAX_FILE_SIZE   (8U * 1024U)
+#define FFS_MAX_FILE_SIZE   (100U * 1024U)   /* streamed from the PC; the area holds 112 KB */
 
 /* ── Shell ──────────────────────────────────────────────────── */
 #define SHELL_LINE_LEN      80
@@ -114,8 +114,11 @@
 #define TETRIS_BOARD_H      20
 #define TETRIS_CELL_SZ      10
 
+/* ── Calculator ─────────────────────────────────────────────── */
+#define CALC_HISTORY        20        /* calculations kept (~3 KB of RAM) */
+
 /* ── Text editor ────────────────────────────────────────────── */
-#define EDITOR_MAX_BYTES    FFS_MAX_FILE_SIZE   /* any file the FS can hold */
+#define EDITOR_MAX_BYTES    (8U * 1024U)      /* held in RAM while editing */
 
 /* ── Watchdog ───────────────────────────────────────────────── */
 /* Reset if the firmware stops feeding it for about 8 s (independent

@@ -144,7 +144,14 @@ PC7, 115200 8N1, 3.3 V levels. Connect a 3.3 V USB-serial adapter there
 
 ## PC file transfer
 
-With the calculator connected over USB:
+**From the browser** (nothing to install): open `tools/web/uploader.html`
+in Chrome or Edge on a computer — double-click it, or host it, for
+example with GitHub Pages — click *Connect*, pick the calculator, then
+drag files onto the page. The page lists, uploads, downloads and
+deletes files, in Dutch or English. Web Serial isn't available in
+Firefox or Safari, or on phones.
+
+**From the command line**, with the calculator connected over USB:
 
 ```bash
 python tools/upload.py --port /dev/ttyACM0 list
@@ -154,5 +161,10 @@ python tools/upload.py --port /dev/ttyACM0 delete notes.txt
 ```
 
 `tools/transfer.py` does the same with a slightly different command
-line (`upload <local> [<name on calculator>]`). Files are at most 8 KB,
-and names at most 23 characters without spaces.
+line (`upload <local> [<name on calculator>]`). Files are at most 100 KB
+(all files together about 112 KB), and names at most 23 characters
+without spaces. Uploading over an existing file keeps the old one until
+the new one is complete, unless both don't fit.
+
+Statistics data can be prepared on the PC: upload a `stats.csv` with one
+`x,y` pair per line (`y` may be left empty).

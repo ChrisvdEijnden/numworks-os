@@ -14,6 +14,7 @@
  *  - UP recalls the previous line.
  * ================================================================ */
 #include "python_app.h"
+#include "../../ui/lang.h"
 #include "../../hal/display.h"
 #include "../../hal/keyboard.h"
 #include "../../ui/line_input.h"
@@ -100,8 +101,8 @@ static void draw_line(const char *prompt, const char *text, bool shift, bool alp
 static void draw_footer(void) {
     display_fill_rect(0, LCD_HEIGHT - FOOTER_H, LCD_WIDTH, FOOTER_H, C_FOOT);
     display_str(4, LCD_HEIGHT - FOOTER_H + 3,
-                s_cont ? "Lege regel + EXE: blok uitvoeren"
-                       : "EXE:Uitvoeren ALPHA:Letters HOME:Terug",
+                s_cont ? TR("Lege regel + EXE: blok uitvoeren", "Empty line + EXE: run the block")
+                       : TR("EXE:Uitvoeren ALPHA:Letters HOME:Terug", "EXE:Run  ALPHA:Letters  HOME:Back"),
                 YELLOW, C_FOOT);
 }
 
@@ -154,7 +155,7 @@ static void set_line(const char *text) {
 static void run_block(void) {
     if (s_left) { mp_forget_imports(); s_left = false; }
     display_fill_rect(0, INPUT_Y, LCD_WIDTH, INPUT_H, C_INPT);
-    display_str(2, INPUT_Y + 3, "Bezig...  BACK stopt", RGB(150,200,150), C_INPT);
+    display_str(2, INPUT_Y + 3, TR("Bezig...  BACK stopt", "Running...  BACK stops"), RGB(150,200,150), C_INPT);
     mp_set_console(&s_console);
     mp_exec_repl(s_block);
     mp_set_console(NULL);
@@ -175,7 +176,7 @@ static void enter_line(void) {
      * in '\n', which is what closes a block */
     int need = (s_cont ? 1 : 0) + (blank ? 0 : s_len);
     if (s_blen + need >= BLOCK_MAX) {
-        out_print("Invoer te lang\n");
+        out_print(TR("Invoer te lang\n", "Input too long\n"));
         s_blen = 0; s_block[0] = 0; s_cont = false;
         set_line("");
         return;
@@ -201,7 +202,7 @@ void python_app_redraw(void) {
     display_fill(C_BG);
     display_fill_rect(0, 0, LCD_WIDTH, HEADER_H, C_HDR);
     display_str(6, 8, "Python", WHITE, C_HDR);
-    display_str(LCD_WIDTH - 76, 8, "HOME:Terug", RGB(180,255,180), C_HDR);
+    display_str(LCD_WIDTH - 84, 8, TR("HOME:Terug", "HOME:Back"), RGB(180,255,180), C_HDR);
     draw_output();
     draw_input();
     draw_footer();
@@ -212,7 +213,7 @@ void python_app_init(void) {
     memset(s_out, 0, sizeof(s_out));
     s_len = 0; s_line[0] = 0; s_last[0] = 0;
     s_blen = 0; s_block[0] = 0; s_cont = false;
-    out_print("MicroPython\nBACK onderbreekt een lopend script\n");
+    out_print(TR("MicroPython\nBACK onderbreekt een lopend script\n", "MicroPython\nBACK interrupts a running script\n"));
 }
 
 void python_app_handle_event(const kernel_event_t *ev) {

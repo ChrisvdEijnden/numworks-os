@@ -23,6 +23,10 @@ typedef enum {
     APP_DOCS,
     APP_SETTINGS,
     APP_TEXT_EDITOR,
+    APP_STATISTICS,
+    APP_GAMES,
+    APP_SNAKE,
+    APP_2048,
     APP_COUNT
 } app_state_t;
 

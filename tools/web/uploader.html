@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NumWorks OS bestanden</title>
+<style>
+  :root {
+    --bg: #f6f7fb; --panel: #ffffff; --text: #1c2030; --muted: #667085;
+    --line: #e3e6ef; --accent: #2557d6; --accent-text: #ffffff; --danger: #c62828;
+    --ok: #1b7f3b; --drop: #eef3ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11131a; --panel: #1a1d27; --text: #e8eaf2; --muted: #9aa3b8;
+      --line: #2b3040; --accent: #5b8cff; --accent-text: #0b0d14; --danger: #ff6b6b;
+      --ok: #5fd38a; --drop: #1d2640;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 22px; margin: 0; flex: 1 1 auto; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+           border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button.danger { color: var(--danger); }
+  button:disabled { opacity: .5; cursor: default; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  #status { color: var(--muted); }
+  #status.ok { color: var(--ok); }
+  #status.err { color: var(--danger); }
+  #drop { border: 2px dashed var(--line); border-radius: 12px; padding: 20px; text-align: center; color: var(--muted); }
+  #drop.over { background: var(--drop); border-color: var(--accent); }
+  #drop label { color: var(--accent); cursor: pointer; text-decoration: underline; }
+  progress { width: 100%; height: 8px; margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; }
+  td.size, th.size { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.actions { text-align: right; white-space: nowrap; }
+  td.actions button { padding: 3px 9px; font-size: 13px; margin-left: 4px; }
+  td.name { word-break: break-all; }
+  .muted { color: var(--muted); font-size: 13px; }
+  #unsupported { display: none; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 data-t="title"></h1>
+    <button id="lang" title="Taal / Language"></button>
+    <button id="connect" class="primary" data-t="connect"></button>
+  </header>
+
+  <div id="unsupported" class="panel" data-t="unsupported"></div>
+
+  <div class="panel">
+    <div id="status" data-t="notConnected"></div>
+    <progress id="progress" class="hidden" max="1" value="0"></progress>
+  </div>
+
+  <div class="panel">
+    <div id="drop">
+      <span data-t="drop"></span>
+      <label><input id="pick" type="file" multiple hidden><span data-t="choose"></span></label>
+    </div>
+    <p class="muted" data-t="limits"></p>
+  </div>
+
+  <div class="panel">
+    <table>
+      <thead><tr><th data-t="name"></th><th class="size" data-t="size"></th><th></th></tr></thead>
+      <tbody id="files"><tr><td colspan="3" class="muted" data-t="noList"></td></tr></tbody>
+    </table>
+    <p class="muted"><span id="total"></span></p>
+  </div>
+</main>
+
+<script>
+"use strict";
+/* NumWorks OS — PC file transfer from the browser (Web Serial).
+ *
+ * Speaks the calculator's transfer protocol (usb/usb_cdc.c) over its
+ * USB serial port. One command per line; replies end in "\r\n":
+ *   LIST               -> "<name> <size>" lines, then "OK"
+ *   RECV <name>        -> "DATA <size>", <size> raw bytes, then "OK"
+ *   SEND <name> <size> -> "READY"; then <size> raw bytes -> "OK"
+ *   DEL <name>         -> "OK"
+ *   failures           -> "ERR <reason>"
+ */
+const USB_FILTER = { usbVendorId: 0x1209, usbProductId: 0x0001 };
+const MAX_SIZE = 100 * 1024;      // FFS_MAX_FILE_SIZE
+const MAX_NAME = 23;              // FFS_NAME_LEN - 1
+
+const TEXT = {
+  nl: {
+    title: "NumWorks OS bestanden", connect: "Verbinden", disconnect: "Verbreken",
+    unsupported: "Deze browser kan niet met USB-apparaten praten. Gebruik Chrome of Edge op een computer.",
+    notConnected: "Niet verbonden. Sluit de rekenmachine aan en klik op Verbinden.",
+    connected: "Verbonden met de rekenmachine.", lost: "Verbinding verbroken.",
+    drop: "Sleep bestanden hierheen of ", choose: "kies bestanden",
+    limits: "Maximaal 100 KB per bestand, namen tot 23 tekens zonder spaties (spaties worden _).",
+    name: "Naam", size: "Grootte", noList: "Nog geen lijst. Verbind eerst.", empty: "Geen bestanden.",
+    download: "Ophalen", del: "Wissen", confirmDel: n => `${n} wissen van de rekenmachine?`,
+    uploading: n => `${n} versturen…`, uploaded: n => `${n} verstuurd.`,
+    downloading: n => `${n} ophalen…`, downloaded: n => `${n} opgehaald.`,
+    deleted: n => `${n} gewist.`, tooBig: n => `${n} is groter dan 100 KB.`,
+    badName: n => `De naam ${n} is te lang (max 23 tekens).`,
+    files: (n, kb) => `${n} bestand(en), ${kb} KB`, error: e => `Fout: ${e}`,
+  },
+  en: {
+    title: "NumWorks OS files", connect: "Connect", disconnect: "Disconnect",
+    unsupported: "This browser can't talk to USB devices. Use Chrome or Edge on a computer.",
+    notConnected: "Not connected. Plug in the calculator and click Connect.",
+    connected: "Connected to the calculator.", lost: "Connection lost.",
+    drop: "Drop files here or ", choose: "choose files",
+    limits: "At most 100 KB per file, names up to 23 characters without spaces (spaces become _).",
+    name: "Name", size: "Size", noList: "No list yet. Connect first.", empty: "No files.",
+    download: "Download", del: "Delete", confirmDel: n => `Delete ${n} from the calculator?`,
+    uploading: n => `Sending ${n}…`, uploaded: n => `${n} sent.`,
+    downloading: n => `Fetching ${n}…`, downloaded: n => `${n} downloaded.`,
+    deleted: n => `${n} deleted.`, tooBig: n => `${n} is larger than 100 KB.`,
+    badName: n => `The name ${n} is too long (max 23 characters).`,
+    files: (n, kb) => `${n} file(s), ${kb} KB`, error: e => `Error: ${e}`,
+  },
+};
+let lang = (navigator.language || "").toLowerCase().startsWith("nl") ? "nl" : "en";
+try { lang = localStorage.getItem("nwos-lang") || lang; } catch (e) {}
+const t = k => TEXT[lang][k];
+
+/* ── The serial link ─────────────────────────────────────────── */
+class Link {
+  constructor(port) { this.port = port; this.buf = new Uint8Array(0); this.pending = null; this.queue = Promise.resolve(); }
+  async open() {
+    await this.port.open({ baudRate: 115200 });
+    this.reader = this.port.readable.getReader();
+    this.writer = this.port.writable.getWriter();
+  }
+  async close() {
+    try { await this.reader.cancel(); } catch (e) {}
+    try { this.reader.releaseLock(); this.writer.releaseLock(); } catch (e) {}
+    try { await this.port.close(); } catch (e) {}
+  }
+  async write(data) {
+    await this.writer.write(typeof data === "string" ? new TextEncoder().encode(data) : data);
+  }
+  // Wait for more bytes; one read stays pending across a timeout, so nothing is lost
+  async fill(ms) {
+    if (!this.pending) this.pending = this.reader.read();
+    let timer;
+    const timeout = new Promise((_, no) => { timer = setTimeout(() => no(new Error("timeout")), ms); });
+    try {
+      const r = await Promise.race([this.pending, timeout]);
+      this.pending = null;
+      if (r.done) throw new Error("closed");
+      const b = new Uint8Array(this.buf.length + r.value.length);
+      b.set(this.buf); b.set(r.value, this.buf.length);
+      this.buf = b;
+    } finally { clearTimeout(timer); }
+  }
+  async line(ms = 5000) {
+    for (;;) {
+      const i = this.buf.indexOf(10);
+      if (i >= 0) {
+        const s = new TextDecoder().decode(this.buf.subarray(0, i)).replace(/\r$/, "");
+        this.buf = this.buf.slice(i + 1);
+        if (s.startsWith("ERR")) throw new Error(s.slice(4) || "ERR");
+        return s;
+      }
+      await this.fill(ms);
+    }
+  }
+  async bytes(n, progress) {
+    while (this.buf.length < n) { await this.fill(5000); if (progress) progress(Math.min(this.buf.length, n), n); }
+    const out = this.buf.slice(0, n);
+    this.buf = this.buf.slice(n);
+    return out;
+  }
+  // Commands run one at a time
+  run(fn) { const p = this.queue.then(fn, fn); this.queue = p.catch(() => {}); return p; }
+
+  list() {
+    return this.run(async () => {
+      await this.write("LIST\n");
+      const files = [];
+      for (;;) {
+        const l = await this.line();
+        if (l === "OK") return files;
+        const sp = l.lastIndexOf(" ");
+        files.push({ name: l.slice(0, sp), size: parseInt(l.slice(sp + 1), 10) });
+      }
+    });
+  }
+  recv(name, progress) {
+    return this.run(async () => {
+      await this.write(`RECV ${name}\n`);
+      const h = await this.line();
+      if (!h.startsWith("DATA ")) throw new Error(h);
+      const data = await this.bytes(parseInt(h.slice(5), 10), progress);
+      const ok = await this.line();
+      if (ok !== "OK") throw new Error(ok);
+      return data;
+    });
+  }
+  send(name, data, progress) {
+    return this.run(async () => {
+      await this.write(`SEND ${name} ${data.length}\n`);
+      const r = await this.line();
+      if (r !== "READY") throw new Error(r);
+      for (let o = 0; o < data.length; o += 4096) {
+        await this.write(data.subarray(o, o + 4096));
+        if (progress) progress(Math.min(o + 4096, data.length), data.length);
+      }
+      const ok = await this.line(20000);       // flash writes take a moment
+      if (ok !== "OK") throw new Error(ok);
+    });
+  }
+  del(name) {
+    return this.run(async () => {
+      await this.write(`DEL ${name}\n`);
+      const ok = await this.line();
+      if (ok !== "OK") throw new Error(ok);
+    });
+  }
+}
+
+/* ── Page ────────────────────────────────────────────────────── */
+let link = null;
+let listed = null;
+const $ = id => document.getElementById(id);
+
+function translate() {
+  document.documentElement.lang = lang;
+  document.title = t("title");
+  document.querySelectorAll("[data-t]").forEach(el => {
+    const v = t(el.dataset.t);
+    if (typeof v === "string") el.textContent = v;
+  });
+  $("lang").textContent = lang === "nl" ? "English" : "Nederlands";
+  $("connect").textContent = link ? t("disconnect") : t("connect");
+  render();
+}
+
+function status(msg, kind = "") { const s = $("status"); s.textContent = msg; s.className = kind; }
+function progress(done, total) {
+  const p = $("progress");
+  if (total == null) { p.classList.add("hidden"); return; }
+  p.classList.remove("hidden"); p.max = total; p.value = done;
+}
+function busy(on) { document.querySelectorAll("button, input").forEach(b => { if (b.id !== "lang") b.disabled = on; }); }
+
+function render() {
+  const body = $("files");
+  body.textContent = "";
+  if (!listed) {
+    body.innerHTML = `<tr><td colspan="3" class="muted"></td></tr>`;
+    body.querySelector("td").textContent = t("noList");
+    $("total").textContent = "";
+    return;
+  }
+  if (!listed.length) {
+    body.innerHTML = `<tr><td colspan="3" class="muted"></td></tr>`;
+    body.querySelector("td").textContent = t("empty");
+  }
+  for (const f of listed) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="name"></td><td class="size"></td><td class="actions"><button class="get"></button><button class="danger del"></button></td>`;
+    tr.querySelector(".name").textContent = f.name;
+    tr.querySelector(".size").textContent = f.size < 1024 ? `${f.size} B` : `${(f.size / 1024).toFixed(1)} KB`;
+    tr.querySelector(".get").textContent = t("download");
+    tr.querySelector(".del").textContent = t("del");
+    tr.querySelector(".get").onclick = () => download(f.name);
+    tr.querySelector(".del").onclick = () => remove(f.name);
+    tr.dataset.name = f.name;
+    body.appendChild(tr);
+  }
+  const total = listed.reduce((a, f) => a + f.size, 0);
+  $("total").textContent = t("files")(listed.length, (total / 1024).toFixed(1));
+}
+
+async function act(fn) {
+  busy(true);
+  try { await fn(); }
+  catch (e) { status(t("error")(e.message), "err"); }
+  finally { busy(false); progress(0, null); }
+}
+
+async function refresh() { listed = await link.list(); render(); }
+
+async function connect() {
+  if (link) { await link.close(); link = null; listed = null; status(t("notConnected")); translate(); return; }
+  await act(async () => {
+    const port = await navigator.serial.requestPort({ filters: [USB_FILTER] });
+    const l = new Link(port);
+    await l.open();
+    link = l;
+    status(t("connected"), "ok");
+    translate();
+    await refresh();
+  });
+}
+
+async function upload(files) {
+  if (!link) { status(t("notConnected"), "err"); return; }
+  await act(async () => {
+    for (const file of files) {
+      const name = file.name.replace(/\s+/g, "_");
+      if (name.length > MAX_NAME) throw new Error(t("badName")(name));
+      if (file.size > MAX_SIZE) throw new Error(t("tooBig")(name));
+      status(t("uploading")(name));
+      const data = new Uint8Array(await file.arrayBuffer());
+      await link.send(name, data, progress);
+      status(t("uploaded")(name), "ok");
+    }
+    await refresh();
+  });
+}
+
+async function download(name) {
+  await act(async () => {
+    status(t("downloading")(name));
+    const data = await link.recv(name, progress);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([data]));
+    a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    status(t("downloaded")(name), "ok");
+    window.lastDownload = { name, data };      // for tests
+  });
+}
+
+async function remove(name) {
+  if (!confirm(t("confirmDel")(name))) return;
+  await act(async () => { await link.del(name); status(t("deleted")(name), "ok"); await refresh(); });
+}
+
+$("lang").onclick = () => {
+  lang = lang === "nl" ? "en" : "nl";
+  try { localStorage.setItem("nwos-lang", lang); } catch (e) {}
+  translate();
+};
+$("connect").onclick = connect;
+$("pick").onchange = e => { upload([...e.target.files]); e.target.value = ""; };
+const drop = $("drop");
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); upload([...e.dataTransfer.files]); };
+
+if (!("serial" in navigator)) {
+  $("unsupported").style.display = "block";
+  $("connect").disabled = true;
+} else {
+  navigator.serial.addEventListener("disconnect", e => {
+    if (link && e.target === link.port) { link = null; listed = null; status(t("lost"), "err"); translate(); }
+  });
+}
+translate();
+</script>
+</body>
+</html>

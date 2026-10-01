@@ -8,6 +8,7 @@
  * ================================================================ */
 #include "commands.h"
 #include "../hal/battery.h"
+#include "../ui/lang.h"
 #include "shell.h"
 #include "../fs/flashfs.h"
 #include "../kernel/kernel.h"
@@ -53,6 +54,7 @@ static void cmd_help(void) {
 
 static void ls_cb(const ffs_entry_t *e, void *ctx) {
     (void)ctx;
+    if (e->name[0] == '.') return;            /* system files, like .settings */
     shell_print("  %-20s  %5lu B\n", e->name, (unsigned long)e->size);
 }
 
@@ -111,32 +113,36 @@ static void count_cb(const ffs_entry_t *e, void *ctx) { (void)e; (*(int *)ctx)++
 static void cmd_mem(void) {
     uint32_t a, b;
     hal_stack_stats(&a, &b);
-    shell_print("Stack:  %lu / %lu B (piek)\n", (unsigned long)a, (unsigned long)b);
+    shell_print(TR("Stack:  %lu / %lu B (piek)\n", "Stack:  %lu / %lu B (peak)\n"), (unsigned long)a, (unsigned long)b);
     hal_heap_stats(&a, &b);
     shell_print("C-heap: %lu / %lu B\n", (unsigned long)a, (unsigned long)b);
     if (mp_heap_stats(&a, &b))
         shell_print("Python: %lu / %lu B\n", (unsigned long)a, (unsigned long)b);
     else
-        shell_puts("Python: niet ingebouwd\n");
+        shell_puts(TR("Python: niet ingebouwd\n", "Python: not built in\n"));
     if (flashfs_mounted()) {
         int n = 0;
         flashfs_ls(count_cb, &n);
         flashfs_stats(&a, &b);
-        shell_print("Flash:  %lu / %lu B, %d bestand(en)\n",
+        shell_print(TR("Flash:  %lu / %lu B, %d bestand(en)\n", "Flash:  %lu / %lu B, %d file(s)\n"),
                     (unsigned long)a, (unsigned long)(a + b), n);
     } else {
-        shell_puts("Flash:  geen opslag\n");
+        shell_puts(TR("Flash:  geen opslag\n", "Flash:  no storage\n"));
     }
 }
 
 static void cmd_bat(void) {
-    static const char *LEVELS[] = { "bijna leeg", "laag", "half", "vol" };
+    static const char *const NL[] = { "bijna leeg", "laag", "half", "vol" };
+    static const char *const EN[] = { "nearly empty", "low", "half", "full" };
     uint32_t mv = battery_mv();
-    shell_print("Batterij: %lu.%02lu V (%s)\n", (unsigned long)(mv / 1000U),
-                (unsigned long)(mv % 1000U / 10U), LEVELS[battery_level()]);
-    shell_print("USB-voeding: %s\n", battery_usb_powered() ? "ja" : "nee");
+    int l = battery_level();
+    shell_print(TR("Batterij: %lu.%02lu V (%s)\n", "Battery: %lu.%02lu V (%s)\n"), (unsigned long)(mv / 1000U),
+                (unsigned long)(mv % 1000U / 10U), TR(NL[l], EN[l]));
+    shell_print(TR("USB-voeding: %s\n", "USB power: %s\n"),
+                battery_usb_powered() ? TR("ja", "yes") : TR("nee", "no"));
     if (battery_usb_powered())
-        shell_print("Laden: %s\n", battery_charging() ? "bezig" : "klaar");
+        shell_print(TR("Laden: %s\n", "Charging: %s\n"),
+                    battery_charging() ? TR("bezig", "in progress") : TR("klaar", "done"));
 }
 
 static void cmd_run_script(void) {

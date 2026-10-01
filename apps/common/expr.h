@@ -31,7 +31,7 @@ expr_status_t expr_eval(const char *src, double x, double *out);
 /* Value of `ans` in later expressions (the calculator's last result) */
 void expr_set_ans(double v);
 
-/* Short (Dutch) description of an error status */
+/* Short description of an error status, in the interface language */
 const char *expr_error(expr_status_t st);
 
 /* Format a result for display: up to 10 significant digits */

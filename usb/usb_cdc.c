@@ -130,7 +130,10 @@ static int s_list_n = 0, s_list_i = 0;
 static char     s_name[FFS_NAME_LEN];
 static uint32_t s_off, s_size, s_pos;
 static uint32_t s_last_rx_ms;
-static uint8_t  s_file[FFS_MAX_FILE_SIZE];   /* SEND assembles the file here */
+/* SEND streams the file to flash a page at a time (flashfs_stream_*) */
+static uint8_t  s_chunk[256];
+static uint32_t s_chunk_len;
+static bool     s_send_failed;   /* keep reading the data, then report */
 
 static void reply(const char *msg) {
     char buf[REPLY_MAX];
@@ -175,9 +178,19 @@ static void handle_command(char *cmd) {
         if (*end || sp[1] == 0)          { reply("ERR bad_size");  return; }
         if (!name_ok(name))              { reply("ERR bad_name");  return; }
         if (size > FFS_MAX_FILE_SIZE)    { reply("ERR too_large"); return; }
+        /* The old file stays until the new one is complete. If both
+         * don't fit, replace it: delete first, then write. */
+        if (flashfs_stream_begin(name, (uint32_t)size) != 0 &&
+            !(!flashfs_stream_active() && flashfs_exists(name) && flashfs_delete(name) == 0 &&
+              flashfs_stream_begin(name, (uint32_t)size) == 0)) {
+            reply("ERR no_space");
+            return;
+        }
         strncpy(s_name, name, FFS_NAME_LEN - 1);
         s_name[FFS_NAME_LEN - 1] = 0;
         s_size = (uint32_t)size; s_pos = 0;
+        s_chunk_len = 0;
+        s_send_failed = false;
         s_last_rx_ms = hal_tick_ms();
         s_st = ST_SEND;
         reply("READY");
@@ -246,15 +259,27 @@ static bool recv_step(void) {
     return true;
 }
 
+static void flush_chunk(void) {
+    if (s_chunk_len && !s_send_failed &&
+        flashfs_stream_write(s_chunk, s_chunk_len) != (int)s_chunk_len)
+        s_send_failed = true;
+    s_chunk_len = 0;
+}
+
 static bool send_step(void) {
     if (s_pos < s_size) {
-        int n = rx_take(s_file + s_pos, (int)(s_size - s_pos));
+        uint32_t want = s_size - s_pos;
+        if (want > sizeof(s_chunk) - s_chunk_len) want = sizeof(s_chunk) - s_chunk_len;
+        int n = rx_take(s_chunk + s_chunk_len, (int)want);
         if (n > 0) {
             s_pos += (uint32_t)n;
+            s_chunk_len += (uint32_t)n;
             s_last_rx_ms = hal_tick_ms();
+            if (s_chunk_len == sizeof(s_chunk) || s_pos == s_size) flush_chunk();
             return true;
         }
         if (hal_tick_ms() - s_last_rx_ms > SEND_TIMEOUT_MS) {
+            flashfs_stream_abort();
             reply("ERR timeout");
             s_st = ST_LINE;
             return true;
@@ -262,7 +287,8 @@ static bool send_step(void) {
         return false;
     }
     if (usb_cdc_tx_free() < REPLY_MAX) return false;
-    reply(flashfs_write(s_name, s_file, s_size) == (int)s_size ? "OK" : "ERR write_failed");
+    if (s_send_failed) { flashfs_stream_abort(); reply("ERR write_failed"); }
+    else reply(flashfs_stream_end() == (int)s_size ? "OK" : "ERR write_failed");
     s_st = ST_LINE;
     return true;
 }

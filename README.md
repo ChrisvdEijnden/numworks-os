@@ -1,8 +1,9 @@
 # NumWorks OS — custom calculator firmware
 
 A custom firmware for NumWorks calculators: a graphical home screen,
-a calculator, graphing, equation solving, MicroPython, a shell, a file
-manager, a text editor and Tetris.
+a calculator with history, graphing with analysis, equation solving,
+statistics, MicroPython, a shell, a file manager, a text editor and
+three games, in Dutch or English.
 
 > **Status — read first.**
 > - The code targets the **STM32F730** (the NumWorks N0110 family). The
@@ -18,19 +19,20 @@ manager, a text editor and Tetris.
 
 ## Features
 
-| App | Dutch name | What it does | State |
+| App | English name | What it does | State |
 |-----|-----------|--------------|-------|
-| **Rekenmachine** | Calculator | Scientific calculator, `Ans`, inverse functions | Works (native evaluator) |
-| **Functies** | Functions | Up to 4 functions: graph (pan/zoom), table; edit/delete | Works |
+| **Rekenmachine** | Calculator | Scientific calculator, `Ans`, inverse functions; a history to scroll back through and reuse | Works (native evaluator) |
+| **Functies** | Functions | Up to 4 functions: graph (pan/zoom), trace cursor, zeros, minima, maxima and intersections; table | Works |
 | **Vergelijkingen** | Equations | Quadratic, 2×2 linear system, f(x)=0 (Newton) | Works |
+| **Statistiek** | Statistics | Lists X and Y; n, mean, median, quartiles, standard deviation; linear regression; scatter plot, box plot, histogram; kept in `stats.csv` | Works |
 | **Python** | Python REPL | MicroPython: multi-line blocks, `input()`, import your own `.py` files, `math`, `time`, `random`, `os`, `display`, NumWorks' `kandinsky` and `ion`, `open()` to read and write files | Needs `make mp` |
 | **Bestanden** | File manager | Open in editor, new file, delete (SHIFT twice) | Works |
 | **Shell** | Shell | `ls cat touch rm echo run mem bat fm reboot`; also over UART | Works |
-| **Tetris** | Tetris | Classic Tetris | Works |
-| **Docs** | Docs | Built-in reference | Works |
-| **Instellingen** | Settings | RGB LED, screen brightness, version, reboot | Works |
+| **Spellen** | Games | Tetris, Snake and 2048, best scores kept | Works |
+| **Docs** | Help | Built-in reference, Dutch and English | Works |
+| **Instellingen** | Settings | RGB LED, screen brightness, language (Dutch/English), version, reboot; kept across restarts | Works |
 | **Editor** | Text editor | Files up to 8 KB, scrolls sideways for long lines, asks a name for new files | Works |
-| PC transfer | `tools/upload.py` | List, upload, download, delete files over USB (a serial port on the PC) | Works in simulation |
+| PC transfer | `tools/web/uploader.html`, `tools/upload.py` | List, upload, download, delete files (up to 100 KB) over USB, from Chrome/Edge or the command line | Works in simulation |
 
 ## Keys
 
@@ -39,6 +41,12 @@ Navigate with the arrow keys, **OK** (or **EXE**) opens or confirms,
 
 - In the math apps, **SHIFT** gives the inverse function
   (sin → asin, ln → e^x, √ → ∛).
+- In the calculator, **UP/DOWN** walk through earlier calculations;
+  **LEFT/RIGHT** pick the calculation or its result, **OK** puts it in
+  the input, **BACKSPACE** removes it from the history.
+- In a graph, **OK** starts a trace cursor (**LEFT/RIGHT** move it,
+  **UP/DOWN** pick the function) and **TOOLBOX** finds the next zero,
+  minimum, maximum or intersection to the right of it.
 - In text fields (shell, editor, Python), **ALPHA** types the letters
   printed on the keys; SHIFT+ALPHA types capitals. **SHIFT** alone
   types `[ ] { } = _ < > #` on `( ) × ÷ + − . 0 ,`.
@@ -60,7 +68,8 @@ Navigate with the arrow keys, **OK** (or **EXE**) opens or confirms,
 
 Files are kept in the last 256 KB of the external flash, in two halves;
 tidying up writes the other half first, so a power cut can't lose
-files that were already saved.
+files that were already saved. Settings (LED, brightness, language)
+and the games' best scores are kept in a small file, `.settings`.
 
 ## Home screen
 
@@ -68,11 +77,11 @@ files that were already saved.
 ┌──────────────┬──────────────┬──────────────┐
 │ Rekenmachine │  Functies    │ Vergelijking │
 ├──────────────┼──────────────┼──────────────┤
-│   Python     │  Bestanden   │    Shell     │
+│  Statistiek  │   Python     │  Bestanden   │
 ├──────────────┼──────────────┼──────────────┤
-│   Tetris     │    Docs      │ Instellingen │
+│   Editor     │    Shell     │   Spellen    │
 ├──────────────┼──────────────┼──────────────┤
-│   Editor     │              │              │
+│    Docs      │ Instellingen │              │
 └──────────────┴──────────────┴──────────────┘
 ```
 
@@ -100,6 +109,7 @@ numworks-os/
 ├── shell/                      Terminal UI + commands
 ├── ui/
 │   ├── filemanager.c           File manager
+│   ├── lang.c/h                Interface language (Dutch / English)
 │   └── line_input.c            Blocking line input (Python's input())
 ├── usb/
 │   ├── usb_cdc.c/h             PC transfer protocol
@@ -113,9 +123,14 @@ numworks-os/
 │                               `random`, `os`, open()
 ├── apps/
 │   ├── common/expr.c/h         Expression evaluator (math apps)
+│   ├── common/analysis.c/h     Zeros and extremes (graph analysis)
+│   ├── common/stats.c/h        Statistics and linear regression
+│   ├── settings/prefs.c/h      Settings kept in `.settings`
+│   ├── games/                  Games menu, Snake, 2048
 │   └── <app>/                  One directory per app
 ├── tools/
-│   ├── upload.py               PC file transfer
+│   ├── web/uploader.html       PC file transfer from Chrome or Edge
+│   ├── upload.py               PC file transfer, command line
 │   └── transfer.py             Same, alternative command line
 └── docs/
     ├── BUILD.md                Building, flashing, recovery

@@ -46,11 +46,15 @@ SRCS_C := \
     ui/filemanager.c \
     ui/line_input.c \
     ui/font.c \
+    ui/lang.c \
+    apps/settings/prefs.c \
     ui/battery_icon.c \
     usb/usb_cdc.c \
     usb/usb_device.c \
     micropython-port/mp_port.c \
     apps/common/expr.c \
+    apps/common/analysis.c \
+    apps/common/stats.c \
     apps/home/home.c \
     apps/calculator/calculator.c \
     apps/functions/functions.c \
@@ -59,7 +63,11 @@ SRCS_C := \
     apps/tetris/tetris.c \
     apps/docs_app/docs_app.c \
     apps/settings/settings.c \
-    apps/text_editor/text_editor.c
+    apps/text_editor/text_editor.c \
+    apps/statistics/statistics.c \
+    apps/games/games.c \
+    apps/games/snake.c \
+    apps/games/g2048.c
 
 SRCS_S := bootloader/startup_stm32f730.s
 

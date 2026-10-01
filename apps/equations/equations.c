@@ -12,6 +12,7 @@
  *  3. Single equation: f(x) = 0, solved numerically
  * ================================================================ */
 #include "equations.h"
+#include "../../ui/lang.h"
 #include "../../hal/display.h"
 #include "../../hal/keyboard.h"
 #include "../common/expr.h"
@@ -59,8 +60,8 @@ static bool finite_(double v) { return !isnan(v) && !isinf(v); }
 static bool field_value(const char *src, const char *label, double *out) {
     expr_status_t st = expr_eval(src, 0.0, out);
     if (st == EXPR_OK && finite_(*out)) return true;
-    snprintf(s_result[s_nresult++], 64, "Fout in %s %s", label,
-             st == EXPR_OK ? "geen getal" : expr_error(st));
+    snprintf(s_result[s_nresult++], 64, TR("Fout in %s %s", "Error in %s %s"), label,
+             st == EXPR_OK ? TR("geen getal", "not a number") : expr_error(st));
     return false;
 }
 
@@ -72,7 +73,8 @@ static void solve_quad(void) {
     double D = b*b - 4*a*c;
     snprintf(s_result[s_nresult++], 64, "D = %.6g", D);
     if (a == 0) {
-        if (b == 0) snprintf(s_result[s_nresult++], 64, c == 0 ? "Elke x is een oplossing" : "Geen oplossing");
+        if (b == 0) snprintf(s_result[s_nresult++], 64, c == 0 ? TR("Elke x is een oplossing", "Every x is a solution")
+                                                                    : TR("Geen oplossing", "No solution"));
         else snprintf(s_result[s_nresult++], 64, "x = %.10g", -c/b);
     } else if (D > 0) {
         double r1 = (-b + sqrt(D)) / (2*a);
@@ -80,7 +82,7 @@ static void solve_quad(void) {
         snprintf(s_result[s_nresult++], 64, "x1 = %.10g", r1);
         snprintf(s_result[s_nresult++], 64, "x2 = %.10g", r2);
     } else if (D == 0) {
-        snprintf(s_result[s_nresult++], 64, "x = %.10g  (dubbel)", -b/(2*a));
+        snprintf(s_result[s_nresult++], 64, TR("x = %.10g  (dubbel)", "x = %.10g  (double)"), -b/(2*a));
     } else {
         double re = -b/(2*a), im = fabs(sqrt(-D)/(2*a));
         snprintf(s_result[s_nresult++], 64, "x1 = %.6g + %.6gi", re, im);
@@ -98,7 +100,7 @@ static void solve_linear(void) {
     double a=v[0], b=v[1], c=v[2], d=v[3], e=v[4], f=v[5];
     double det = a*e - b*d;
     if (fabs(det) < 1e-12) {
-        snprintf(s_result[s_nresult++], 64, "Geen unieke oplossing");
+        snprintf(s_result[s_nresult++], 64, "%s", TR("Geen unieke oplossing", "No unique solution"));
     } else {
         double x = (c*e - b*f) / det;
         double y = (a*f - c*d) / det;
@@ -122,7 +124,7 @@ static void solve_single(void) {
     double probe;
     expr_status_t st = expr_eval(s_single, 0.0, &probe);
     if (st != EXPR_OK) {
-        snprintf(s_result[s_nresult++], 64, "Fout: %s", expr_error(st));
+        snprintf(s_result[s_nresult++], 64, TR("Fout: %s", "Error: %s"), expr_error(st));
         show_results();
         return;
     }
@@ -147,7 +149,7 @@ static void solve_single(void) {
             return;
         }
     }
-    snprintf(s_result[s_nresult++], 64, "Geen oplossing gevonden");
+    snprintf(s_result[s_nresult++], 64, "%s", TR("Geen oplossing gevonden", "No solution found"));
     show_results();
 }
 
@@ -189,7 +191,7 @@ static void draw_quad(void) {
 }
 
 static void draw_linear(void) {
-    display_str(6, HEADER_H+8, "Lineair stelsel 2x2", YELLOW, C_BG);
+    display_str(6, HEADER_H+8, TR("Lineair stelsel 2x2", "Linear system 2x2"), YELLOW, C_BG);
     const char *lbl[] = {"a=","b=","c=","d=","e=","f="};
     char *vals[] = {s_lin[0],s_lin[1],s_lin[2],s_lin[3],s_lin[4],s_lin[5]};
     for (int i = 0; i < 6; i++) {
@@ -209,9 +211,9 @@ static void draw_linear(void) {
 void equations_redraw(void) {
     display_fill(C_BG);
     display_fill_rect(0, 0, LCD_WIDTH, HEADER_H, C_HDR);
-    display_str(6, 8, "Vergelijkingen", WHITE, C_HDR);
+    display_str(6, 8, TR("Vergelijkingen", "Equations"), WHITE, C_HDR);
     /* Mode tabs */
-    const char *tabs[] = {"Kwadratisch","Lineair","Enkelvoudig"};
+    const char *tabs[] = {TR("Kwadratisch", "Quadratic"), TR("Lineair", "Linear"), TR("Enkelvoudig", "Single")};
     for (int i = 0; i < 3; i++) {
         uint16_t tc = (i==s_mode) ? WHITE : RGB(150,150,200);
         display_str(4 + i*107, HEADER_H+1, tabs[i], tc,
@@ -221,14 +223,14 @@ void equations_redraw(void) {
         case MODE_QUAD:   draw_quad();   break;
         case MODE_LINEAR: draw_linear(); break;
         default:
-            display_str(6, HEADER_H+30, "Vergelijking: f(x)=0", YELLOW, C_BG);
+            display_str(6, HEADER_H+30, TR("Vergelijking: f(x)=0", "Equation: f(x)=0"), YELLOW, C_BG);
             display_fill_rect(4, HEADER_H+52, LCD_WIDTH-8, 22, s_editing?C_SEL:C_FLD);
             {char line[72]; snprintf(line,sizeof(line),"%s%s",tail(s_editing?s_input:s_single,42),s_editing?"_":"");
              display_str(8, HEADER_H+57, line, WHITE, s_editing?C_SEL:C_FLD);}
             break;
     }
-    display_str(4, LCD_HEIGHT-14, s_editing ? "OK:Klaar  XNT: x  ALPHA:Annuleer"
-                                            : "OK:Los op  ALPHA:Bewerk  L/R:Modus",
+    display_str(4, LCD_HEIGHT-14, s_editing ? TR("OK:Klaar  XNT: x  ALPHA:Annuleer", "OK:Done  XNT: x  ALPHA:Cancel")
+                                            : TR("OK:Los op  ALPHA:Bewerk  L/R:Modus", "OK:Solve  ALPHA:Edit  L/R:Mode"),
                 YELLOW, C_BG);
     show_results();
 }

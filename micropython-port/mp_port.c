@@ -14,6 +14,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include "mp_port.h"
+#include "../ui/lang.h"
 #include "../hal/hal.h"
 #include "../hal/keyboard.h"
 #include "../hal/display.h"
@@ -73,7 +74,7 @@ void mp_pause_after_graphics(void) {
     if (!s_graphics) return;
     s_graphics = false;
     display_fill_rect(0, LCD_HEIGHT - 12, LCD_WIDTH, 12, BLACK);
-    display_str(4, LCD_HEIGHT - 10, "Druk op een toets om verder te gaan", GREY, BLACK);
+    display_str(4, LCD_HEIGHT - 10, TR("Druk op een toets om verder te gaan", "Press a key to continue"), GREY, BLACK);
     display_flush();
     key_event_t ev;
     for (;;) {
@@ -128,7 +129,7 @@ void mp_hal_stdout_tx_strn_cooked(const char *str, size_t len) {
  * embed port's own version just hangs) */
 void __wrap_nlr_jump_fail(void *val) {
     (void)val;
-    hal_panic("MicroPython: onopgevangen fout");
+    hal_panic(TR("MicroPython: onopgevangen fout", "MicroPython: uncaught error"));
 }
 
 /* micropython.kbd_intr(): the interrupt key is BACK/HOME, not a char */
@@ -225,8 +226,8 @@ extern int nwos_close_files(void);
 int mp_close_files(void) {
     int failed = nwos_close_files();
     if (failed) {
-        static const char msg[] = "Let op: een geopend bestand kon niet worden opgeslagen.\n";
-        out_strn(msg, sizeof(msg) - 1);
+        const char *msg = TR("Let op: een geopend bestand kon niet worden opgeslagen.\n", "Note: an open file could not be saved.\n");
+        out_strn(msg, strlen(msg));
     }
     return failed;
 }
@@ -251,8 +252,8 @@ extern int nwos_flush_files(void);
 void mp_exec_repl(const char *src) {
     exec_source(MP_QSTR__lt_stdin_gt_, src, strlen(src), MP_PARSE_SINGLE_INPUT);
     if (nwos_flush_files()) {
-        static const char msg[] = "Let op: een geopend bestand kon niet worden opgeslagen.\n";
-        out_strn(msg, sizeof(msg) - 1);
+        const char *msg = TR("Let op: een geopend bestand kon niet worden opgeslagen.\n", "Note: an open file could not be saved.\n");
+        out_strn(msg, strlen(msg));
     }
 }
 
@@ -271,9 +272,9 @@ void mp_forget_imports(void) {}
 int mp_close_files(void) { return 0; }
 
 static void not_available(void) {
-    static const char msg[] = "Python niet beschikbaar (bouw met 'make mp').\n";
+    const char *msg = TR("Python niet beschikbaar (bouw met 'make mp').\n", "Python not available (build with 'make mp').\n");
     begin_run();
-    out_strn(msg, sizeof(msg) - 1);
+    out_strn(msg, strlen(msg));
 }
 
 void mp_exec_str(const char *src) { (void)src; not_available(); }

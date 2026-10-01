@@ -9,6 +9,8 @@
 #include "hal/led.h"
 #include "hal/backlight.h"
 #include "hal/battery.h"
+#include "ui/lang.h"
+#include "apps/settings/prefs.h"
 #include "kernel/kernel.h"
 #include "fs/flashfs.h"
 #include "fs/storage.h"
@@ -25,6 +27,8 @@
 #include "apps/docs_app/docs_app.h"
 #include "apps/settings/settings.h"
 #include "apps/text_editor/text_editor.h"
+#include "apps/statistics/statistics.h"
+#include "apps/games/games.h"
 #include "include/config.h"
 #include <string.h>
 
@@ -33,9 +37,9 @@ static void boot_splash(uint32_t ms_start) {
     display_fill(RGB(10,10,20));
     display_fill_rect(0, 0, LCD_WIDTH, 30, RGB(30,80,200));
     display_str(10,  8, "NumWorks OS",        WHITE, RGB(30,80,200));
-    display_str(10, 40, "N0120 Custom Firmware",GREY, RGB(10,10,20));
+    display_str(10, 40, TR("Firmware voor de N0110", "Firmware for the N0110"), GREY, RGB(10,10,20));
     display_str(10, 56, "STM32F730 @ 192 MHz",  GREY, RGB(10,10,20));
-    display_str(10, 72, "Initialiseren...",     RGB(100,200,255), RGB(10,10,20));
+    display_str(10, 72, TR("Opstarten...", "Starting..."), RGB(100,200,255), RGB(10,10,20));
 
     /* Progress bar */
     display_rect(20, 110, 280, 14, RGB(60,60,80));
@@ -54,8 +58,9 @@ static void boot_splash(uint32_t ms_start) {
     } while (elapsed < 1500);
 
     if (hal_reset_by_watchdog())
-        display_str(10, 124, "Herstart na een vastloper (watchdog).", YELLOW, RGB(10,10,20));
-    display_str(10, 140, "Klaar!", RGB(100,255,100), RGB(10,10,20));
+        display_str(10, 124, TR("Herstart na een vastloper (watchdog).",
+                                "Restarted after a hang (watchdog)."), YELLOW, RGB(10,10,20));
+    display_str(10, 140, TR("Klaar!", "Ready!"), RGB(100,255,100), RGB(10,10,20));
     display_flush();
     hal_delay_ms(300);
 }
@@ -75,9 +80,9 @@ static void boot_message(const char *a, const char *b, const char *c) {
  * flash driver misbehaves on this board, BACK keeps the calculator
  * usable. */
 static int ask_format(void) {
-    boot_message("Geen bestandssysteem gevonden.",
-                 "OK: formatteren (wist de opslag)",
-                 "BACK: overslaan, niets wordt bewaard");
+    boot_message(TR("Geen bestandssysteem gevonden.", "No file system found."),
+                 TR("OK: formatteren (wist de opslag)", "OK: format (erases the storage)"),
+                 TR("BACK: overslaan, niets wordt bewaard", "BACK: skip, nothing will be saved"));
     key_event_t ev;
     for (;;) {
         hal_delay_ms(10);
@@ -85,11 +90,11 @@ static int ask_format(void) {
         if (key_is_exe((key_code_t)ev.key)) break;
         if (ev.key == KEY_BACK || ev.key == KEY_HOME) return FFS_ERR_FORMAT;
     }
-    boot_message("Formatteren...", NULL, NULL);
+    boot_message(TR("Formatteren...", "Formatting..."), NULL, NULL);
     int r = flashfs_format();
     if (r != FFS_OK) {
-        boot_message("Formatteren mislukt.", storage_status(),
-                     "Bestanden worden niet bewaard.");
+        boot_message(TR("Formatteren mislukt.", "Formatting failed."), storage_status(),
+                     TR("Bestanden worden niet bewaard.", "Files will not be saved."));
         hal_delay_ms(2500);
     }
     return r;
@@ -112,6 +117,10 @@ static void app_init_all(void) {
     docs_init();
     settings_init();
     text_editor_init();
+    statistics_init();
+    games_init();
+    snake_init();
+    g2048_init();
     shell_init();
 }
 
@@ -141,11 +150,12 @@ int main(void) {
     hal_boot_log(storage_status());
     if (fs == FFS_ERR_FORMAT) fs = ask_format();
     else if (fs == FFS_ERR_NODEV) {
-        boot_message("Geen opslag gevonden:", storage_status(),
-                     "Bestanden worden niet bewaard.");
+        boot_message(TR("Geen opslag gevonden:", "No storage found:"), storage_status(),
+                     TR("Bestanden worden niet bewaard.", "Files will not be saved."));
         hal_delay_ms(2000);
     }
     hal_boot_log(fs == FFS_OK ? "flashfs: mounted" : "flashfs: not in use");
+    prefs_load();          /* LED, brightness, language */
 
     /* 4. USB CDC (virtual serial for PC transfer) */
     usb_cdc_init();

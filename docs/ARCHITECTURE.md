@@ -59,8 +59,8 @@ DTCM  0x2000_0000  16 KB  stack (grows down from 0x2000_4000; an
 SRAM  0x2001_0000 150 KB  framebuffer (320×240×2)
       0x2003_5800   3 KB  .data, including the QSPI flash routines
                           (they must not run from the QSPI flash)
-      then         ~29 KB .bss
-      then  ... 0x2004_0000  newlib heap (~10 KB)
+      then         ~26 KB .bss
+      then  ... 0x2004_0000  newlib heap (~13 KB)
 ```
 
 Internal flash (64 KB on the F730x8) holds NumWorks' bootloader and is
@@ -263,7 +263,20 @@ highest generation wins, so a power cut *during* compaction leaves the
 old area, with all files, in use. The generation is also stored
 inverted, so a half-finished erase can't make a stale area look newer.
 
-Limits: 32 files, 8 KB per file, names up to 23 characters.
+Limits: 32 files, 100 KB per file (the area holds 112 KB of data),
+names up to 23 characters. Names starting with a dot (`.settings`) are
+the system's own: the file manager and `ls` don't show them.
+
+**Streamed writes.** A file too big to hold in RAM is written with
+`flashfs_stream_begin(name, size)`, `..._write()` and `..._end()`:
+begin reserves the space (compacting first if needed), the data is
+programmed as it arrives, and only `end` appends the record that makes
+it the file, so a power cut or an abort leaves the old file as it was.
+Other files can be written meanwhile, after the reservation; if one of
+them triggers a compaction, the stream is ended and its `end` fails.
+Replacing a file needs room for both copies until the new one is
+complete. PC uploads use this, a page at a time, so there's no RAM
+buffer for the whole file.
 
 The flash is memory-mapped, so `flashfs_map()` hands out a file's
 contents in place (valid until the next write). Python reads scripts
@@ -276,9 +289,52 @@ and modules this way instead of copying them to RAM.
 - `x`, `pi`, `e`, `ans`;
 - sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, sqrt, cbrt, ln, log, exp, abs.
 
-The Calculator, Functions (graph and table) and Equations apps all use
-it. The single-equation solver runs Newton's method from several
-starting points.
+The Calculator, Functions, Equations and Statistics apps all use it.
+The single-equation solver runs Newton's method from several starting
+points.
+
+**Calculator.** Each calculation goes into a history (the last
+`CALC_HISTORY`, 20, with the whole expression), newest just above the
+input. UP/DOWN select one, LEFT/RIGHT choose its calculation or result,
+OK copies that into the input. An error keeps the input for fixing.
+
+**Graph analysis** (`apps/common/analysis.c`). OK starts a trace cursor
+on a function; TOOLBOX finds the next zero, minimum, maximum or
+intersection to the right of the cursor, inside the visible window.
+The window is sampled at 1200 points: a zero is a sign change refined by
+bisection (a sign change across a pole, like 1/x at 0, is rejected
+because |f| grows instead of shrinking); an extremum is a sample above
+or below both neighbours, refined by golden-section search, which pins
+it down to about 1e-8; an intersection is a zero of f − g.
+
+**Statistics** (`apps/common/stats.c`). Lists X and Y of up to 100
+values, typed in a table (cells accept expressions) or uploaded as
+`stats.csv` (one `x,y` per line, which is also how they're saved).
+One-variable summary of X: n, sum, mean, median, quartiles (medians of
+the lower and upper halves, the median left out for odd n, as on the
+TI-84), min, max, range, standard deviation (population and sample).
+With X/Y pairs: the least-squares line y = ax + b and r. Plots: a
+scatter plot with the line, or a box plot and a histogram (Sturges'
+rule for the number of bins).
+
+## Games
+
+A Games menu holds Tetris, Snake and 2048; BACK in a game returns to
+it. Snake's speed goes up with every apple; 2048 merges each tile at
+most once per move. Best scores are kept in `.settings`.
+
+## Settings and language
+
+`apps/settings/prefs.c` keeps the LED colour, the brightness, the
+language and the best scores in `.settings`, a small text file
+(`key=value` lines, unknown keys ignored). It is loaded right after the
+file system at boot, written when leaving Settings (only if it
+changed), and when a game sets a record.
+
+Every text on screen goes through `TR("dutch", "english")`
+(`ui/lang.h`), so switching the language in Settings changes the whole
+interface at once, including the help, the crash screen and error
+messages.
 
 ## MicroPython
 
@@ -290,7 +346,9 @@ Configuration is in `micropython-port/mpconfigport.h`:
   file whose `write()` collects text in RAM and saves it on `close()`,
   at the end of a `with` block, after each REPL entry, at the end of a
   script, or when leaving the Python app (at most 4 open for writing,
-  8 KB each). `print(..., file=f)` isn't supported; use `f.write()`;
+  16 KB each: they are held in the Python heap until saved; bigger
+  files can come from the PC). `print(..., file=f)` isn't supported;
+  use `f.write()`;
 - `os`: `listdir()`, `remove()`, `rename()`, `stat()` (size at
   index 6);
 - `import name` loads `name.py` from flash (no packages: the file
@@ -372,11 +430,15 @@ LIST               -> "<name> <size>" per file, then "OK"
 RECV <name>        -> "DATA <size>", <size> raw bytes, then "OK"
 SEND <name> <size> -> "READY"; the PC sends <size> raw bytes -> "OK"
 DEL <name>         -> "OK"
-failures           -> "ERR <reason>"
+failures           -> "ERR <reason>"   (not_found, too_large, no_space, ...)
 ```
 
 `usb/usb_cdc.c` implements it on two ring buffers, which the USB device
-stack fills and drains. The PC side is `tools/upload.py`.
+stack fills and drains. SEND streams the file to flash (up to 100 KB);
+if the old and new versions don't both fit, the old one is deleted
+first, and if the new one still doesn't fit the reply is `ERR
+no_space`. The PC side is `tools/web/uploader.html` (Chrome or Edge,
+Web Serial) or `tools/upload.py`.
 
 ## USB
 

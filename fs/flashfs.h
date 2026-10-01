@@ -72,5 +72,17 @@ int  flashfs_rename(const char *from, const char *to);
 bool flashfs_exists(const char *path);
 bool flashfs_mounted(void);
 
+/* Streamed write, for files too big for RAM: begin reserves space for
+ * `size` bytes (fails if they don't fit, even after compacting), write
+ * adds the data in order, end commits it once all `size` bytes are in.
+ * Until then the old file stays as it was. One stream at a time (begin
+ * fails while another is open); a compaction caused by another write
+ * ends it (write/end then fail). */
+int  flashfs_stream_begin(const char *path, uint32_t size);
+int  flashfs_stream_write(const void *data, uint32_t len);
+int  flashfs_stream_end(void);
+void flashfs_stream_abort(void);
+bool flashfs_stream_active(void);
+
 int  flashfs_ls(void (*cb)(const ffs_entry_t *e, void *ctx), void *ctx);
 void flashfs_stats(uint32_t *used, uint32_t *free_bytes);

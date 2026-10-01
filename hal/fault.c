@@ -9,6 +9,7 @@
  * interrupts, SysTick or the heap.
  * ================================================================ */
 #include "fault.h"
+#include "../ui/lang.h"
 #include "hal.h"
 #include "uart.h"
 #include "display.h"
@@ -98,11 +99,11 @@ __attribute__((noreturn)) static void show_and_reset(void) {
         const uint16_t bg = RGB(60, 0, 0), hdr = RGB(200, 30, 30);
         display_fill(bg);
         display_fill_rect(0, 0, LCD_WIDTH, 24, hdr);
-        display_str(8, 8, "Systeemfout", WHITE, hdr);
+        display_str(8, 8, TR("Systeemfout", "System error"), WHITE, hdr);
         for (int i = 0; i < s_nlines; i++)
             display_str(10, (int16_t)(32 + i * 14), s_lines[i], i == 0 ? YELLOW : WHITE, bg);
-        display_str(10, LCD_HEIGHT - 28, "Druk op een toets om te herstarten.", WHITE, bg);
-        display_str(10, LCD_HEIGHT - 14, "Bestanden blijven bewaard.", RGB(255,180,180), bg);
+        display_str(10, LCD_HEIGHT - 28, TR("Druk op een toets om te herstarten.", "Press a key to restart."), WHITE, bg);
+        display_str(10, LCD_HEIGHT - 14, TR("Bestanden blijven bewaard.", "Your files are kept."), RGB(255,180,180), bg);
         display_flush();
     }
     wait_key();
@@ -120,33 +121,33 @@ static void enter(void) {
 void hal_panic(const char *msg) {
     uintptr_t caller = (uintptr_t)__builtin_return_address(0);
     enter();
-    add_line("Fout: ", msg);
-    add_hex("Aanroeper: ", (uint32_t)caller);
-    add_dec("Tijd sinds start (ms): ", g_tick_ms);
+    add_line(TR("Fout: ", "Error: "), msg);
+    add_hex(TR("Aanroeper: ", "Caller: "), (uint32_t)caller);
+    add_dec(TR("Tijd sinds start (ms): ", "Time since start (ms): "), g_tick_ms);
     show_and_reset();
 }
 
 /* Most likely cause, from the configurable fault status register */
 static const char *cause(uint32_t cfsr) {
-    static const struct { uint32_t bit; const char *text; } T[] = {
-        { 1U << 12, "stack vol (BusFault bij stacken)" },
-        { 1U << 4,  "stack vol (MemManage bij stacken)" },
-        { 1U << 25, "deling door nul" },
-        { 1U << 24, "niet-uitgelijnde toegang" },
-        { 1U << 16, "ongeldige instructie" },
-        { 1U << 17, "ongeldige status (Thumb-bit)" },
-        { 1U << 18, "ongeldige terugkeer uit interrupt" },
-        { 1U << 19, "coprocessor (FPU) uitgeschakeld" },
-        { 1U << 9,  "ongeldig geheugenadres" },
-        { 1U << 10, "ongeldig adres (uitgesteld)" },
-        { 1U << 8,  "code ophalen mislukt" },
-        { 1U << 1,  "geheugenbescherming (data)" },
-        { 1U << 0,  "geheugenbescherming (code)" },
-        { 1U << 11, "fout bij terugzetten stack" },
-        { 1U << 3,  "fout bij terugzetten stack" },
+    static const struct { uint32_t bit; const char *nl, *en; } T[] = {
+        { 1U << 12, "stack vol (BusFault bij stacken)", "stack full (BusFault while stacking)" },
+        { 1U << 4,  "stack vol (MemManage bij stacken)", "stack full (MemManage while stacking)" },
+        { 1U << 25, "deling door nul", "division by zero" },
+        { 1U << 24, "niet-uitgelijnde toegang", "unaligned access" },
+        { 1U << 16, "ongeldige instructie", "invalid instruction" },
+        { 1U << 17, "ongeldige status (Thumb-bit)", "invalid state (Thumb bit)" },
+        { 1U << 18, "ongeldige terugkeer uit interrupt", "invalid return from interrupt" },
+        { 1U << 19, "coprocessor (FPU) uitgeschakeld", "coprocessor (FPU) disabled" },
+        { 1U << 9,  "ongeldig geheugenadres", "invalid memory address" },
+        { 1U << 10, "ongeldig adres (uitgesteld)", "invalid address (imprecise)" },
+        { 1U << 8,  "code ophalen mislukt", "instruction fetch failed" },
+        { 1U << 1,  "geheugenbescherming (data)", "memory protection (data)" },
+        { 1U << 0,  "geheugenbescherming (code)", "memory protection (code)" },
+        { 1U << 11, "fout bij terugzetten stack", "error restoring the stack" },
+        { 1U << 3,  "fout bij terugzetten stack", "error restoring the stack" },
     };
     for (unsigned i = 0; i < sizeof(T) / sizeof(T[0]); i++)
-        if (cfsr & T[i].bit) return T[i].text;
+        if (cfsr & T[i].bit) return TR(T[i].nl, T[i].en);
     return NULL;
 }
 
@@ -157,15 +158,15 @@ void fault_report(const uint32_t *frame, uint32_t ipsr) {
     uint32_t exc = ipsr & 0x1FF;
     switch (exc) {
         case 3:  add_line("HardFault", NULL); break;
-        case 4:  add_line("MemManage-fout", NULL); break;
+        case 4:  add_line(TR("MemManage-fout", "MemManage fault"), NULL); break;
         case 5:  add_line("BusFault", NULL); break;
         case 6:  add_line("UsageFault", NULL); break;
         default:
-            if (exc >= 16) add_dec("Onverwachte interrupt: IRQ ", exc - 16);
-            else           add_dec("Onverwachte exceptie: ", exc);
+            if (exc >= 16) add_dec(TR("Onverwachte interrupt: IRQ ", "Unexpected interrupt: IRQ "), exc - 16);
+            else           add_dec(TR("Onverwachte exceptie: ", "Unexpected exception: "), exc);
     }
     const char *why = cause(cfsr);
-    if (why) add_line("Oorzaak: ", why);
+    if (why) add_line(TR("Oorzaak: ", "Cause: "), why);
 
     /* The stacked frame is r0-r3, r12, lr, pc, xpsr. If the stack had
      * overflowed it may not exist, so check before reading it. */
@@ -173,12 +174,12 @@ void fault_report(const uint32_t *frame, uint32_t ipsr) {
         add_hex("PC:   ", frame[6]);
         add_hex("LR:   ", frame[5]);
     } else {
-        add_hex("SP buiten de stack: ", (uint32_t)(uintptr_t)frame);
+        add_hex(TR("SP buiten de stack: ", "SP outside the stack: "), (uint32_t)(uintptr_t)frame);
     }
     add_hex("CFSR: ", cfsr);
     add_hex("HFSR: ", hfsr);
-    if (cfsr & CFSR_BFARVALID) add_hex("Adres: ", SCB_BFAR);
-    else if (cfsr & CFSR_MMARVALID) add_hex("Adres: ", SCB_MMFAR);
-    add_dec("Tijd sinds start (ms): ", g_tick_ms);
+    if (cfsr & CFSR_BFARVALID) add_hex(TR("Adres: ", "Address: "), SCB_BFAR);
+    else if (cfsr & CFSR_MMARVALID) add_hex(TR("Adres: ", "Address: "), SCB_MMFAR);
+    add_dec(TR("Tijd sinds start (ms): ", "Time since start (ms): "), g_tick_ms);
     show_and_reset();
 }

@@ -23,7 +23,7 @@ import os
 import sys
 
 TIMEOUT = 3.0
-MAX_FILE_SIZE = 8 * 1024   # FFS_MAX_FILE_SIZE in include/config.h
+MAX_FILE_SIZE = 100 * 1024   # FFS_MAX_FILE_SIZE in include/config.h
 
 
 class DeviceError(RuntimeError):

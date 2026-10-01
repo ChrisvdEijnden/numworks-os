@@ -24,6 +24,8 @@
 #include "../apps/docs_app/docs_app.h"
 #include "../apps/settings/settings.h"
 #include "../apps/text_editor/text_editor.h"
+#include "../apps/statistics/statistics.h"
+#include "../apps/games/games.h"
 #include <string.h>
 
 static kernel_t  g_kernel;
@@ -172,12 +174,17 @@ void task_shell(void) {
             case APP_DOCS:         docs_handle_event(&ev);          break;
             case APP_SETTINGS:     settings_handle_event(&ev);      break;
             case APP_TEXT_EDITOR:  text_editor_handle_event(&ev);   break;
+            case APP_STATISTICS:   statistics_handle_event(&ev);    break;
+            case APP_GAMES:        games_handle_event(&ev);         break;
+            case APP_SNAKE:        snake_handle_event(&ev);         break;
+            case APP_2048:         g2048_handle_event(&ev);         break;
             default: break;
         }
     }
     /* Apps that do work between key presses */
     switch (g_kernel.app_state) {
         case APP_TETRIS: tetris_tick(); break;
+        case APP_SNAKE:  snake_tick();  break;
         case APP_SHELL:  shell_tick();  break;
         default: break;
     }
@@ -233,6 +240,10 @@ void kernel_set_app(app_state_t app) {
         case APP_DOCS:         docs_redraw();              break;
         case APP_SETTINGS:     settings_redraw();         break;
         case APP_TEXT_EDITOR:  text_editor_redraw();       break;
+        case APP_STATISTICS:   statistics_redraw();        break;
+        case APP_GAMES:        games_redraw();             break;
+        case APP_SNAKE:        snake_redraw();             break;
+        case APP_2048:         g2048_redraw();             break;
         default: break;
     }
 }

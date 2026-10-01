@@ -4,11 +4,12 @@
  *
  * Icons row by row:
  *   Rekenmachine | Functies  | Vergelijkingen
- *   Python       | Bestanden | Shell
- *   Tetris       | Docs      | Instellingen
- *   Editor       | [spare]   | [spare]
+ *   Statistiek   | Python    | Bestanden
+ *   Editor       | Shell     | Spellen
+ *   Docs         | Instellingen | [spare]
  * ================================================================ */
 #include "home.h"
+#include "../../ui/lang.h"
 #include "../../hal/battery.h"
 #include "../../ui/battery_icon.h"
 #include "../../hal/display.h"
@@ -29,22 +30,22 @@
 #define IW       (LCD_WIDTH  / HOME_COLS)
 #define IH       ((LCD_HEIGHT - HEADER_H) / HOME_ROWS)
 #define GRID_SZ  (HOME_COLS * HOME_ROWS)
-#define N_REAL   10    /* apps; the remaining slots are empty */
+#define N_REAL   11    /* apps; the remaining slot is empty */
 
-typedef struct { const char *label; app_state_t app; uint16_t dot; } item_t;
+typedef struct { const char *nl, *en; app_state_t app; uint16_t dot; } item_t;
 static const item_t ITEMS[GRID_SZ] = {
-    {"Rekenmachine", APP_CALCULATOR,   RGB(0,200,150)  },
-    {"Functies",     APP_FUNCTIONS,    RGB(80,180,255) },
-    {"Vergelijking", APP_EQUATIONS,    RGB(255,160,60) },
-    {"Python",       APP_PYTHON,       RGB(255,200,0)  },
-    {"Bestanden",    APP_FILEMANAGER,  RGB(100,220,80) },
-    {"Shell",        APP_SHELL,        RGB(200,80,200) },
-    {"Tetris",       APP_TETRIS,       RGB(255,60,60)  },
-    {"Docs",         APP_DOCS,         RGB(120,120,220)},
-    {"Instellingen", APP_SETTINGS,     RGB(180,180,180)},
-    {"Editor",       APP_TEXT_EDITOR,  RGB(240,240,140)},
-    {"",             APP_COUNT,        C_ICON          },
-    {"",             APP_COUNT,        C_ICON          },
+    {"Rekenmachine", "Calculator",   APP_CALCULATOR,   RGB(0,200,150)  },
+    {"Functies",     "Functions",    APP_FUNCTIONS,    RGB(80,180,255) },
+    {"Vergelijking", "Equations",    APP_EQUATIONS,    RGB(255,160,60) },
+    {"Statistiek",   "Statistics",   APP_STATISTICS,   RGB(80,220,200) },
+    {"Python",       "Python",       APP_PYTHON,       RGB(255,200,0)  },
+    {"Bestanden",    "Files",        APP_FILEMANAGER,  RGB(100,220,80) },
+    {"Editor",       "Editor",       APP_TEXT_EDITOR,  RGB(240,240,140)},
+    {"Shell",        "Shell",        APP_SHELL,        RGB(200,80,200) },
+    {"Spellen",      "Games",        APP_GAMES,        RGB(255,60,60)  },
+    {"Docs",         "Help",         APP_DOCS,         RGB(120,120,220)},
+    {"Instellingen", "Settings",     APP_SETTINGS,     RGB(180,180,180)},
+    {"",             "",             APP_COUNT,        C_ICON          },
 };
 
 static int s_cur = 0;
@@ -60,14 +61,14 @@ static void draw_icon(int i) {
     display_rect     (ox+PAD, oy+PAD, IW-2*PAD, IH-2*PAD, bd);
     if (i >= N_REAL) return;
     display_fill_rect(ox + IW/2 - 5, oy + PAD + 6, 11, 11, ITEMS[i].dot);
-    display_str(ox+PAD+3, oy+IH-14, ITEMS[i].label, fg, bg);
+    display_str(ox+PAD+3, oy+IH-14, TR(ITEMS[i].nl, ITEMS[i].en), fg, bg);
 }
 
 /* Battery symbol, and a warning when it's nearly empty */
 void home_draw_status(void) {
     bool empty = battery_level() == BAT_EMPTY && !battery_usb_powered();
     display_fill_rect(110, 0, LCD_WIDTH - 110, HEADER_H, C_HDR);
-    if (empty) display_str(110, 8, "Batterij bijna leeg", RED, C_HDR);
+    if (empty) display_str(110, 8, TR("Batterij bijna leeg", "Battery nearly empty"), RED, C_HDR);
     else       display_str(LCD_WIDTH - 112, 8, "EXE:Open", RGB(200,220,255), C_HDR);
     battery_icon_draw(LCD_WIDTH - 8 - BATTERY_ICON_W, 8, C_HDR);
 }

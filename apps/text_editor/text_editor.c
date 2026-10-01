@@ -12,6 +12,7 @@
  *  - Scrolls vertically and horizontally to keep the cursor in view
  * ================================================================ */
 #include "text_editor.h"
+#include "../../ui/lang.h"
 #include "../../hal/display.h"
 #include "../../hal/keyboard.h"
 #include "../../fs/flashfs.h"
@@ -114,23 +115,23 @@ static void draw_bars(void) {
     display_fill_rect(0, 0, LCD_WIDTH, HEADER_H, C_HDR);
     char hdr[48];
     snprintf(hdr, sizeof(hdr), "Editor: %s%s",
-             s_filename[0]?s_filename:"[nieuw]",
+             s_filename[0]?s_filename:TR("[nieuw]", "[new]"),
              s_modified?" *":"");
     display_str(6, 6, hdr, WHITE, C_HDR);
     int cl = cursor_line();
     char pos[24];
-    int pn = snprintf(pos, sizeof(pos), "r%d k%d", cl + 1, s_cpos - line_start(cl) + 1);
+    int pn = snprintf(pos, sizeof(pos), TR("r%d k%d", "L%d C%d"), cl + 1, s_cpos - line_start(cl) + 1);
     display_str((int16_t)(LCD_WIDTH - 6 - pn * CHAR_W), 6, pos, RGB(200,220,255), C_HDR);
 
     display_fill_rect(0, LCD_HEIGHT-FOOTER_H, LCD_WIDTH, FOOTER_H, RGB(25,25,40));
     char foot[64];
     if (s_naming && !s_status[0])
-        snprintf(foot, sizeof(foot), "Naam: %s_ (%s)",
+        snprintf(foot, sizeof(foot), TR("Naam: %s_ (%s)", "Name: %s_ (%s)"),
                  s_name, s_alpha ? (s_shift ? "ABC" : "abc") : "123");
     else if (s_status[0])
         snprintf(foot, sizeof(foot), "%s", s_status);
     else
-        snprintf(foot, sizeof(foot), "%s%s  SHIFT+OK:Opslaan  HOME:Terug",
+        snprintf(foot, sizeof(foot), TR("%s%s  SHIFT+OK:Opslaan  HOME:Terug", "%s%s  SHIFT+OK:Save  HOME:Back"),
                  s_shift?"SHF ":"", s_alpha?"ABC":"   ");
     display_str(2, LCD_HEIGHT-FOOTER_H+3, foot,
                 s_status[0] ? CYAN : YELLOW, RGB(25,25,40));
@@ -171,14 +172,14 @@ static void save_file(void) {
     }
     if (flashfs_write(s_filename, s_text, (uint32_t)s_tlen) == s_tlen) {
         s_modified = false;
-        s_status = "Opgeslagen";
+        s_status = TR("Opgeslagen", "Saved");
     } else {
-        s_status = "Opslaan mislukt!";   /* keep the changes marked unsaved */
+        s_status = TR("Opslaan mislukt!", "Saving failed!");   /* keep the changes marked unsaved */
     }
 }
 
 static void insert_char(char c) {
-    if (s_tlen >= MAX_B) { s_status = "Bestand vol (max 8 KB)"; return; }
+    if (s_tlen >= MAX_B) { s_status = TR("Bestand vol (max 8 KB)", "File full (max 8 KB)"); return; }
     memmove(s_text+s_cpos+1, s_text+s_cpos, s_tlen-s_cpos+1);
     s_text[s_cpos++] = c;
     s_tlen++;
@@ -202,7 +203,7 @@ static void naming_key(key_code_t k) {
     s_status = "";
     if (k == KEY_HOME || k == KEY_BACK) {
         s_naming = false; s_alpha = false;
-        s_status = "Niet opgeslagen";
+        s_status = TR("Niet opgeslagen", "Not saved");
     } else if (k == KEY_SHIFT) {
         s_shift = !s_shift;
     } else if (k == KEY_ALPHA) {
@@ -211,9 +212,9 @@ static void naming_key(key_code_t k) {
         if (s_name_len > 0) s_name[--s_name_len] = 0;
     } else if (key_is_exe(k)) {
         if (s_name_len == 0) {
-            s_status = "Geef eerst een naam";
+            s_status = TR("Geef eerst een naam", "Enter a name first");
         } else if (flashfs_exists(s_name)) {
-            s_status = "Naam bestaat al, kies een andere";   /* never overwrite */
+            s_status = TR("Naam bestaat al, kies een andere", "Name exists, choose another");   /* never overwrite */
         } else {
             strncpy(s_filename, s_name, FFS_NAME_LEN-1);
             s_filename[FFS_NAME_LEN-1] = 0;

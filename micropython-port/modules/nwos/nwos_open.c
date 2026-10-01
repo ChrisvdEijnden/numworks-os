@@ -10,14 +10,18 @@
  * close() (or at the end of `with`). Files a script leaves open are
  * saved when the script ends (nwos_close_files()); at the REPL, what an
  * entry wrote is saved when it finishes (nwos_flush_files()), so that
- * `open(name, "w").write(text)` works as in CPython. Files are at most
- * FFS_MAX_FILE_SIZE bytes.
+ * `open(name, "w").write(text)` works as in CPython. A file written
+ * from Python is held in the Python heap until it is saved, so it can
+ * be at most PY_WRITE_MAX bytes (bigger files can come from the PC).
  * ================================================================ */
 #include <string.h>
 #include "py/runtime.h"
 #include "py/mperrno.h"
 #include "py/builtin.h"
 #include "py/stream.h"
+
+/* Files written from Python live in the 48 KB Python heap until saved */
+#define PY_WRITE_MAX (16U * 1024U)
 #include "../../../fs/flashfs.h"
 
 #define MAX_OPEN 4
@@ -50,7 +54,7 @@ static int save(nwos_writer_t *w) {
 static mp_uint_t writer_write(mp_obj_t self_in, const void *buf, mp_uint_t size, int *errcode) {
     nwos_writer_t *w = MP_OBJ_TO_PTR(self_in);
     if (!w->open) { *errcode = MP_EBADF; return MP_STREAM_ERROR; }
-    if (w->data.len + size > FFS_MAX_FILE_SIZE) { *errcode = MP_ENOSPC; return MP_STREAM_ERROR; }
+    if (w->data.len + size > PY_WRITE_MAX) { *errcode = MP_ENOSPC; return MP_STREAM_ERROR; }
     vstr_add_strn(&w->data, buf, size);
     w->dirty = true;
     return size;

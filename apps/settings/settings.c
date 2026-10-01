@@ -6,9 +6,11 @@
  * Settings:
  *  1. Lamp / LED: Uit | Rood | Groen | Blauw | Wit
  *  2. Helderheid (backlight, 16 levels)
- *  3. Taal: NL (fixed)
+ *  3. Taal / Language: Nederlands | English
  *  4. Versie-info
  *  5. Systeem reset
+ * The values are kept in g_prefs (prefs.c) and saved to flash when
+ * leaving the app, so they survive a restart.
  * ================================================================ */
 #include "settings.h"
 #include "../../hal/display.h"
@@ -16,6 +18,8 @@
 #include "../../include/config.h"
 #include "../../hal/led.h"
 #include "../../hal/backlight.h"
+#include "../../ui/lang.h"
+#include "prefs.h"
 #include "../../hal/fault.h"
 #include <string.h>
 #include <stdio.h>
@@ -33,8 +37,9 @@ static int s_cursor = 0;
 enum { ROW_LAMP, ROW_BRIGHT, ROW_LANG, ROW_VERSION, ROW_RESET };
 
 static const char *lamp_str(void) {
-    static const char *NAMES[LED_COLOUR_COUNT] = { "Uit", "Rood", "Groen", "Blauw", "Wit" };
-    return NAMES[s_lamp];
+    static const char *const NL[LED_COLOUR_COUNT] = { "Uit", "Rood", "Groen", "Blauw", "Wit" };
+    static const char *const EN[LED_COLOUR_COUNT] = { "Off", "Red", "Green", "Blue", "White" };
+    return TR(NL[s_lamp], EN[s_lamp]);
 }
 
 static uint16_t lamp_swatch(void) {
@@ -53,15 +58,15 @@ static void draw_row(int i) {
     switch (i) {
         case ROW_LAMP: {
             char line[64];
-            snprintf(line, sizeof(line), "Lamp:  %s", lamp_str());
+            snprintf(line, sizeof(line), TR("Lamp:  %s", "LED:   %s"), lamp_str());
             display_str(10, y+8, line, WHITE, bg);
-            display_str(LCD_WIDTH-120, y+8, "L/R:Wissel", RGB(180,220,180), bg);
+            display_str(LCD_WIDTH-120, y+8, TR("L/R:Wissel", "L/R:Change"), RGB(180,220,180), bg);
             display_fill_rect(LCD_WIDTH-30, y+6, 18, 18, lamp_swatch());
             break;
         }
         case ROW_BRIGHT: {
             char line[32];
-            snprintf(line, sizeof(line), "Helderheid: %2d/%d",
+            snprintf(line, sizeof(line), TR("Helderheid: %2d/%d", "Brightness: %2d/%d"),
                      backlight_level() + 1, BACKLIGHT_MAX + 1);
             display_str(10, y+8, line, WHITE, bg);
             int bx = LCD_WIDTH - 12 - (BACKLIGHT_MAX + 1) * 5;
@@ -70,14 +75,19 @@ static void draw_row(int i) {
                                   l <= backlight_level() ? YELLOW : RGB(60,60,70));
             break;
         }
-        case ROW_LANG:
-            display_str(10, y+8, "Taal:  Nederlands", WHITE, bg);
+        case ROW_LANG: {
+            char line[40];
+            snprintf(line, sizeof(line), TR("Taal:  %s", "Language: %s"), lang_name(g_lang));
+            display_str(10, y+8, line, WHITE, bg);
+            display_str(LCD_WIDTH-120, y+8, TR("L/R:Wissel", "L/R:Change"), RGB(180,220,180), bg);
             break;
+        }
         case ROW_VERSION:
-            display_str(10, y+8, "Versie: NumWorks OS v" NWOS_VERSION, WHITE, bg);
+            display_str(10, y+8, TR("Versie: NumWorks OS v" NWOS_VERSION,
+                                    "Version: NumWorks OS v" NWOS_VERSION), WHITE, bg);
             break;
         case ROW_RESET:
-            display_str(10, y+8, "Systeem herstarten", RED, bg);
+            display_str(10, y+8, TR("Systeem herstarten", "Restart"), RED, bg);
             break;
     }
 }
@@ -85,11 +95,12 @@ static void draw_row(int i) {
 void settings_redraw(void) {
     display_fill(C_BG);
     display_fill_rect(0,0,LCD_WIDTH,HEADER_H,C_HDR);
-    display_str(8, 8, "Instellingen", WHITE, C_HDR);
-    display_str(LCD_WIDTH-66, 8, "HOME:Terug", RGB(200,200,220), C_HDR);
+    display_str(8, 8, TR("Instellingen", "Settings"), WHITE, C_HDR);
+    display_str(LCD_WIDTH-82, 8, TR("HOME:Terug", "HOME:Back"), RGB(200,200,220), C_HDR);
     for (int i=0; i<N_SETTINGS; i++) draw_row(i);
     display_str(4, LCD_HEIGHT-12,
-                "UP/DOWN:Navigeren  L/R:Wijzigen  EXE:Bevestigen",
+                TR("UP/DOWN:Kies  L/R:Wijzig  EXE:Bevestig",
+                   "UP/DOWN:Select  L/R:Change  EXE:Confirm"),
                 YELLOW, C_BG);
 }
 
@@ -99,7 +110,7 @@ void settings_handle_event(const kernel_event_t *ev) {
     if (ev->action != 0) return;
     key_code_t k = (key_code_t)ev->key;
 
-    if (k==KEY_HOME||k==KEY_BACK) { kernel_set_app(APP_HOME); return; }
+    if (k==KEY_HOME||k==KEY_BACK) { prefs_save(); kernel_set_app(APP_HOME); return; }
     if (k==KEY_UP   && s_cursor>0)            { s_cursor--; settings_redraw(); return; }
     if (k==KEY_DOWN && s_cursor<N_SETTINGS-1) { s_cursor++; settings_redraw(); return; }
 
@@ -109,14 +120,23 @@ void settings_handle_event(const kernel_event_t *ev) {
             int l = ((int)s_lamp + (k==KEY_RIGHT ? 1 : n-1)) % n;
             s_lamp = (led_colour_t)l;
             led_set(s_lamp);
+            g_prefs.led = (uint8_t)s_lamp;
             draw_row(ROW_LAMP);
         }
     } else if (s_cursor == ROW_BRIGHT) {
         int l = backlight_level();
         if (k==KEY_RIGHT && l < BACKLIGHT_MAX) backlight_set_level((uint8_t)(l + 1));
         if (k==KEY_LEFT  && l > 0)             backlight_set_level((uint8_t)(l - 1));
+        g_prefs.brightness = backlight_level();
         draw_row(ROW_BRIGHT);
+    } else if (s_cursor == ROW_LANG) {
+        if (k==KEY_LEFT || k==KEY_RIGHT) {
+            lang_set(g_lang == LANG_EN ? LANG_NL : LANG_EN);
+            g_prefs.lang = (uint8_t)g_lang;
+            settings_redraw();                 /* every text changes */
+        }
     } else if (s_cursor == ROW_RESET && key_is_exe(k)) {
+        prefs_save();
         hal_reset();
     }
 }

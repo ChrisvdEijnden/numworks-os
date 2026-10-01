@@ -19,6 +19,7 @@
  * Code size target: < 5 KB
  * ================================================================ */
 #include "filemanager.h"
+#include "lang.h"
 #include "../hal/display.h"
 #include "../hal/keyboard.h"
 #include "../fs/flashfs.h"
@@ -48,9 +49,10 @@ static bool      s_del_armed = false;   /* SHIFT pressed once: confirm delete */
 static const char *s_msg = "";          /* one-shot footer message */
 
 /* ── Load file list ──────────────────────────────────────────── */
+/* Names starting with a dot (.settings) are the system's own: hidden */
 static void list_cb(const ffs_entry_t *e, void *ctx) {
     int *n = (int *)ctx;
-    if (*n < FFS_MAX_FILES) {
+    if (e->name[0] != '.' && *n < FFS_MAX_FILES) {
         strncpy(s_items[*n].name, e->name, FFS_NAME_LEN-1);
         s_items[*n].name[FFS_NAME_LEN-1] = 0;
         s_items[*n].size = e->size;
@@ -89,7 +91,7 @@ static void draw_row(int row, int item_idx, bool selected) {
 static void draw_header(void) {
     display_fill_rect(0, 0, LCD_WIDTH, HEADER_H, DKGREY);
     char hdr[48];
-    snprintf(hdr, sizeof(hdr), " FILES  %d/%d  [HOME=back]", s_cursor+1, s_nitem);
+    snprintf(hdr, sizeof(hdr), TR(" BESTANDEN  %d/%d  [HOME=terug]", " FILES  %d/%d  [HOME=back]"), s_cursor+1, s_nitem);
     display_str(0, 3, hdr, CYAN, DKGREY);
 }
 
@@ -97,12 +99,13 @@ static void draw_footer(void) {
     display_fill_rect(0, FOOTER_Y, LCD_WIDTH, FOOTER_H, DKGREY);
     if (s_del_armed && s_nitem > 0) {
         char line[48];
-        snprintf(line, sizeof(line), "Wis %s? SHIFT=ja", s_items[s_cursor].name);
+        snprintf(line, sizeof(line), TR("Wis %s? SHIFT=ja", "Delete %s? SHIFT=yes"), s_items[s_cursor].name);
         display_str(2, FOOTER_Y+3, line, RED, DKGREY);
     } else if (s_msg[0]) {
         display_str(2, FOOTER_Y+3, s_msg, CYAN, DKGREY);
     } else {
-        display_str(2, FOOTER_Y+3, "OK:Bewerk  VAR:Nieuw  SHIFT:Wis  HOME:Terug",
+        display_str(2, FOOTER_Y+3, TR("OK:Bewerk  VAR:Nieuw  SHIFT:Wis  HOME:Terug",
+                                      "OK:Edit  VAR:New  SHIFT:Delete  HOME:Back"),
                     YELLOW, DKGREY);
     }
 }
@@ -120,7 +123,7 @@ void fm_redraw(void) {
 /* ── Input ───────────────────────────────────────────────────── */
 static void fm_delete(void) {
     if (s_nitem == 0) return;
-    if (flashfs_delete(s_items[s_cursor].name) < 0) s_msg = "Wissen mislukt";
+    if (flashfs_delete(s_items[s_cursor].name) < 0) s_msg = TR("Wissen mislukt", "Delete failed");
     fm_redraw();
 }
 
@@ -129,7 +132,7 @@ static void fm_open(void) {
     if (text_editor_open(s_items[s_cursor].name)) {
         kernel_set_app(APP_TEXT_EDITOR);
     } else {
-        s_msg = "Te groot voor de editor (max 4 KB)";
+        s_msg = TR("Te groot voor de editor (max 8 KB)", "Too big for the editor (max 8 KB)");
         draw_footer();
     }
 }

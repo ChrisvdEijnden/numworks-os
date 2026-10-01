@@ -7,6 +7,8 @@
  * Board origin: x=60, y=20  (10*10=100 wide, 20*10=200 tall)
  * ================================================================ */
 #include "tetris.h"
+#include "../../ui/lang.h"
+#include "../settings/prefs.h"
 #include "../../hal/display.h"
 #include "../../hal/keyboard.h"
 #include "../../hal/hal.h"
@@ -130,29 +132,35 @@ static void draw_piece(uint16_t col) {
 
 static void draw_sidebar(void) {
     int sx = OX + BW*CS + 8;
-    display_fill_rect(sx, OY, LCD_WIDTH-sx-2, 160, C_BG);
+    display_fill_rect(sx, OY, LCD_WIDTH-sx-2, 190, C_BG);
     char buf[32];
-    snprintf(buf, sizeof(buf), "Score");  display_str(sx, OY,     buf, YELLOW, C_BG);
+    display_str(sx, OY,      "Score", YELLOW, C_BG);
     snprintf(buf, sizeof(buf), "%d", s_score); display_str(sx, OY+12, buf, WHITE, C_BG);
-    snprintf(buf, sizeof(buf), "Lijnen"); display_str(sx, OY+30,  buf, YELLOW, C_BG);
-    snprintf(buf, sizeof(buf), "%d", s_lines); display_str(sx, OY+42, buf, WHITE, C_BG);
-    snprintf(buf, sizeof(buf), "Level");  display_str(sx, OY+60,  buf, YELLOW, C_BG);
-    snprintf(buf, sizeof(buf), "%d", s_level); display_str(sx, OY+72, buf, WHITE, C_BG);
-    display_str(sx, OY+100, "Ctrl:", RGB(180,180,180), C_BG);
-    display_str(sx, OY+112, "L/R:Beweg", RGB(160,160,160), C_BG);
-    display_str(sx, OY+124, "UP:Draai", RGB(160,160,160), C_BG);
-    display_str(sx, OY+136, "DOWN:Snel", RGB(160,160,160), C_BG);
-    display_str(sx, OY+148, "HOME:Stop", RGB(160,160,160), C_BG);
+    display_str(sx, OY+28,   TR("Record", "Best"), YELLOW, C_BG);
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long)g_prefs.best[BEST_TETRIS]);
+    display_str(sx, OY+40, buf, WHITE, C_BG);
+    display_str(sx, OY+56,   TR("Lijnen", "Lines"), YELLOW, C_BG);
+    snprintf(buf, sizeof(buf), "%d", s_lines); display_str(sx, OY+68, buf, WHITE, C_BG);
+    display_str(sx, OY+84,   "Level", YELLOW, C_BG);
+    snprintf(buf, sizeof(buf), "%d", s_level); display_str(sx, OY+96, buf, WHITE, C_BG);
+    display_str(sx, OY+120, TR("L/R:Beweeg", "L/R:Move"), RGB(160,160,160), C_BG);
+    display_str(sx, OY+132, TR("UP:Draai", "UP:Rotate"), RGB(160,160,160), C_BG);
+    display_str(sx, OY+144, TR("DOWN:Snel", "DOWN:Drop"), RGB(160,160,160), C_BG);
+    display_str(sx, OY+156, TR("BACK:Spellen", "BACK:Games"), RGB(160,160,160), C_BG);
 }
+
+static bool s_new_best;   /* this game set the record */
 
 static void draw_game_over(void) {
     display_fill_rect(40, 100, 240, 40, RGB(200,0,0));
-    display_str(60, 108, "GAME OVER  OK:Opnieuw", WHITE, RGB(200,0,0));
+    display_str(60, 108, TR("GAME OVER  OK:Opnieuw", "GAME OVER  OK:Again"), WHITE, RGB(200,0,0));
+    if (s_new_best) display_str(60, 122, TR("Nieuw record!", "New best score!"), YELLOW, RGB(200,0,0));
 }
 
 /* The falling piece can't move down: fix it, clear lines, spawn the next */
 static void lock_piece(void) {
     stamp_piece(); clear_lines(); new_piece();
+    if (s_game_over) s_new_best = prefs_new_best(BEST_TETRIS, (uint32_t)s_score);
     draw_board();
     draw_piece(PCOL[s_ptype+1]);
     draw_sidebar();
@@ -175,7 +183,7 @@ void tetris_redraw(void) {
 
 void tetris_init(void) {
     memset(s_board, 0, sizeof(s_board));
-    s_score=0; s_lines=0; s_level=0; s_game_over=false;
+    s_score=0; s_lines=0; s_level=0; s_game_over=false; s_new_best=false;
     s_drop_ms=600; s_last_drop=hal_tick_ms();
     new_piece();
 }
@@ -202,7 +210,8 @@ void tetris_handle_event(const kernel_event_t *ev) {
      * every game gets a different piece sequence */
     s_rng ^= hal_tick_us();
 
-    if (k == KEY_HOME || k == KEY_BACK) { kernel_set_app(APP_HOME); return; }
+    if (k == KEY_HOME) { kernel_set_app(APP_HOME); return; }
+    if (k == KEY_BACK) { kernel_set_app(APP_GAMES); return; }
     if (s_game_over) {
         if (key_is_exe(k)) { tetris_init(); tetris_redraw(); }
         return;

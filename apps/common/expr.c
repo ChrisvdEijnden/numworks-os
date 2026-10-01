@@ -11,6 +11,7 @@
  * so -2^2 = -4 and 2^3^2 = 2^9, as on paper.
  * ================================================================ */
 #include "expr.h"
+#include "../../ui/lang.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -186,18 +187,19 @@ expr_status_t expr_eval(const char *src, double x, double *out) {
 const char *expr_error(expr_status_t st) {
     switch (st) {
         case EXPR_OK:         return "";
-        case EXPR_ERR_EMPTY:  return "lege invoer";
-        case EXPR_ERR_SYNTAX: return "syntaxfout";
-        case EXPR_ERR_PAREN:  return "haakjes kloppen niet";
-        case EXPR_ERR_NAME:   return "onbekende naam";
-        case EXPR_ERR_DEPTH:  return "te diep genest";
+        case EXPR_ERR_EMPTY:  return TR("lege invoer", "empty input");
+        case EXPR_ERR_SYNTAX: return TR("syntaxfout", "syntax error");
+        case EXPR_ERR_PAREN:  return TR("haakjes kloppen niet", "unbalanced brackets");
+        case EXPR_ERR_NAME:   return TR("onbekende naam", "unknown name");
+        case EXPR_ERR_DEPTH:  return TR("te diep genest", "nested too deeply");
     }
-    return "fout";
+    return TR("fout", "error");
 }
 
 void expr_format(double v, char *buf, int len) {
-    if (isnan(v))      { snprintf(buf, (size_t)len, "ongedefinieerd"); return; }
-    if (isinf(v))      { snprintf(buf, (size_t)len, v > 0 ? "oneindig" : "-oneindig"); return; }
+    if (isnan(v))      { snprintf(buf, (size_t)len, "%s", TR("ongedefinieerd", "undefined")); return; }
+    if (isinf(v))      { snprintf(buf, (size_t)len, "%s", v > 0 ? TR("oneindig", "infinity")
+                                                              : TR("-oneindig", "-infinity")); return; }
     if (v == 0.0) v = 0.0;          /* print -0 as 0 */
     snprintf(buf, (size_t)len, "%.10g", v);
 }
