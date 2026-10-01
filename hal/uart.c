@@ -9,7 +9,7 @@
 #include <stdbool.h>
 #include "../include/stm32f730.h"
 #include "../include/config.h"
-#include "../include/string.h"
+#include <string.h>
 
 #define RX_BUF 64
 static char     s_rxbuf[RX_BUF];

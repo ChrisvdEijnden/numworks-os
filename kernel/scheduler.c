@@ -10,7 +10,7 @@
  * Code size target: < 1.5 KB
  * ================================================================ */
 #include "scheduler.h"
-#include "../include/string.h"
+#include <string.h>
 
 static task_t  s_tasks[MAX_TASKS];
 static uint8_t s_ntasks = 0;

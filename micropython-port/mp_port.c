@@ -139,6 +139,7 @@ void mp_hal_set_interrupt_char(int c) { (void)c; }
  * while a script runs are consumed. */
 void nwos_mp_poll(void) {
     static uint32_t last;
+    hal_watchdog_feed();          /* a long computation isn't a hang */
     uint32_t now = hal_tick_ms();
     if (now - last < 20) return;
     last = now;
@@ -219,8 +220,20 @@ static void exec_source(qstr name, const char *src, size_t len, mp_parse_input_k
     }
 }
 
+extern int nwos_close_files(void);
+
+int mp_close_files(void) {
+    int failed = nwos_close_files();
+    if (failed) {
+        static const char msg[] = "Let op: een geopend bestand kon niet worden opgeslagen.\n";
+        out_strn(msg, sizeof(msg) - 1);
+    }
+    return failed;
+}
+
 void mp_exec_str(const char *src) {
     exec_source(MP_QSTR__lt_stdin_gt_, src, strlen(src), MP_PARSE_FILE_INPUT);
+    mp_close_files();
 }
 
 bool mp_exec_file(const char *name) {
@@ -229,11 +242,18 @@ bool mp_exec_file(const char *name) {
     if (!flashfs_map(name, &src, &size)) return false;
     mp_forget_imports();                  /* a run sees edited modules */
     exec_source(qstr_from_str(name), src, size, MP_PARSE_FILE_INPUT);
+    mp_close_files();
     return true;
 }
 
+extern int nwos_flush_files(void);
+
 void mp_exec_repl(const char *src) {
     exec_source(MP_QSTR__lt_stdin_gt_, src, strlen(src), MP_PARSE_SINGLE_INPUT);
+    if (nwos_flush_files()) {
+        static const char msg[] = "Let op: een geopend bestand kon niet worden opgeslagen.\n";
+        out_strn(msg, sizeof(msg) - 1);
+    }
 }
 
 bool mp_repl_incomplete(const char *src) {
@@ -248,6 +268,7 @@ void mp_init_port(void) {}
 void mp_deinit_port(void) {}
 bool mp_heap_stats(uint32_t *used, uint32_t *total) { (void)used; (void)total; return false; }
 void mp_forget_imports(void) {}
+int mp_close_files(void) { return 0; }
 
 static void not_available(void) {
     static const char msg[] = "Python niet beschikbaar (bouw met 'make mp').\n";

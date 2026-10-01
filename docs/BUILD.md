@@ -46,7 +46,11 @@ make -j4
 
 Run `make mp` again after changing `mpconfigport.h` or the modules in
 `micropython-port/modules/`, and after updating this repository (if
-either changed). `make distclean` removes the generated package.
+either changed; this version added the `os` module, so run it once).
+`make distclean` removes the generated package.
+
+The C code is compiled against newlib's own headers (`-std=gnu11`);
+`make print-libs` shows which `libc.a` the build found.
 
 ## FatFs (optional, for USB drives)
 
@@ -65,6 +69,9 @@ yet, and the calculator can't power a drive (see *USB notes*).
 
 - The image is linked to execute from the external QSPI flash at
   `0x90000000` (`linker/numworks_n0120.ld`).
+- The last 256 KB of the QSPI flash (from `0x907C0000`) hold the
+  file system; the linker refuses images that would overlap it. On the
+  first start the calculator asks before formatting it.
 - `make flash` writes it there in rescue mode, **over the stock
   firmware**. It asks you to confirm:
 
@@ -77,12 +84,18 @@ yet, and the calculator can't power a drive (see *USB notes*).
   linked for another address, because it would not run there. Use them
   only after switching `LDSCRIPT` to a matching linker script. Phi
   (https://github.com/M4xi1m3/nwphi) was written for the N0110.
+- If the screen stays black, the UART log shows the display ID that was
+  read (`85 85 52` for an ST7789V). If the picture is mirrored, or red
+  and blue are swapped, change `LCD_MADCTL` in `include/config.h`.
+- The watchdog restarts the calculator 8 s after a hang. Set
+  `WATCHDOG_ENABLED` to 0 when stepping through code without a
+  debugger that freezes it.
 
 ### Restore Official Firmware
 
-Don't use `make restore` or `epsilon-qspi-backup.bin`. The first 108 KB
-of that dump (0x0–0x1AFFF) is an old build of this OS, not the Epsilon
-kernel, so it can't boot. Don't write `epsilon.bin` to `0x08000000`
+Don't use the `epsilon-qspi-backup.bin` that earlier versions of this
+repository contained. The first 108 KB of that dump (0x0–0x1AFFF) is an
+old build of this OS, not the Epsilon kernel, so it can't boot. Don't write `epsilon.bin` to `0x08000000`
 either: that is internal flash, where NumWorks' bootloader lives;
 Epsilon itself lives in the external flash.
 

@@ -12,7 +12,7 @@
 #include "../../hal/display.h"
 #include "../../hal/keyboard.h"
 #include "../../include/config.h"
-#include "../../include/stdio.h"
+#include <stdio.h>
 
 #define C_BG     RGB(18,18,30)
 #define C_HDR    RGB(30,80,200)

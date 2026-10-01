@@ -39,6 +39,7 @@ SRCS_C := \
     hal/fault.c \
     hal/clocks.c \
     fs/flashfs.c \
+    fs/storage_qspi.c \
     fs/ff.c \
     fs/diskio.c \
     shell/shell.c \
@@ -63,12 +64,6 @@ SRCS_C := \
 
 SRCS_S := bootloader/startup_stm32f730.s
 
-# Newlib headers are provided by include/stdint.h, include/stdbool.h,
-# include/stddef.h (bare-metal versions that shadow the broken GCC
-# hosted headers on macOS Homebrew arm-none-eabi-gcc).
-# -Iinclude is already in CFLAGS so they are found first.
-NEWLIB_ISYSTEM :=
-
 # libgcc.a location — needed for compiler runtime (divide, float etc.)
 _LIBGCC     := $(shell $(CC) $(MCU) -print-libgcc-file-name 2>/dev/null)
 _LIBGCC_DIR := $(shell dirname $(_LIBGCC))
@@ -84,7 +79,7 @@ OBJS := $(patsubst %.c,$(BUILD)/%.o,$(SRCS_C)) \
 
 # ── Compiler flags ───────────────────────────────────────────────
 CFLAGS := $(MCU) \
-    -std=c11 -Os \
+    -std=gnu11 -Os \
     -ffunction-sections -fdata-sections \
     -fno-exceptions -fno-unwind-tables \
     -fno-asynchronous-unwind-tables -fshort-enums \
@@ -152,6 +147,15 @@ LDFLAGS := $(MCU) \
     -nodefaultlibs \
     $(_LIBC_A) $(_LIBM_A) $(_LIBGCC)
 
+# The C library's headers (newlib). Where the compiler doesn't find them
+# by itself (Homebrew arm-none-eabi-gcc ships without newlib), use the
+# ones next to the libc.a found above.
+_NEWLIB_INC := $(firstword $(wildcard \
+    $(dir $(_LIBC_A))../../../../include/string.h \
+    $(dir $(_LIBC_A))../include/string.h))
+NEWLIB_ISYSTEM := $(if $(_NEWLIB_INC),-isystem $(dir $(_NEWLIB_INC)))
+CFLAGS += $(NEWLIB_ISYSTEM)
+
 # ── MicroPython (optional) ───────────────────────────────────────
 # `make mp` generates micropython-port/micropython_embed/ (MicroPython's
 # embed port: core sources + headers generated for our configuration)
@@ -167,19 +171,14 @@ MP_CORE_SRCS := $(wildcard $(MP_EMBED)/py/*.c) \
 MP_GLUE_SRCS := micropython-port/modules/nwos/moddisplay.c \
                 micropython-port/modules/nwos/nwos_open.c \
                 micropython-port/modules/nwos/modtime.c \
-                micropython-port/modules/nwos/modrandom.c
+                micropython-port/modules/nwos/modrandom.c \
+                micropython-port/modules/nwos/modos.c
 SRCS_C += $(MP_CORE_SRCS) $(MP_GLUE_SRCS)
 OBJS   += $(patsubst %.c,$(BUILD)/%.o,$(MP_CORE_SRCS) $(MP_GLUE_SRCS))
 
-# MicroPython needs the real C library headers (newlib), not the minimal
-# ones in include/. Where the compiler doesn't find them by itself
-# (Homebrew arm-none-eabi-gcc), use the ones next to the libc.a found below.
-_NEWLIB_INC := $(firstword $(wildcard \
-    $(dir $(_LIBC_A))../../../../include/string.h \
-    $(dir $(_LIBC_A))../include/string.h))
 MP_CFLAGS := $(MCU) -std=gnu99 -Os -ffunction-sections -fdata-sections \
     -fshort-enums -DNDEBUG -DNWOS_MICROPYTHON \
-    $(GCC_ISYSTEM) $(if $(_NEWLIB_INC),-isystem $(dir $(_NEWLIB_INC))) \
+    $(GCC_ISYSTEM) $(NEWLIB_ISYSTEM) \
     -Imicropython-port -I$(MP_EMBED)
 # Third-party core: no warnings. Our glue: the usual ones.
 $(patsubst %.c,$(BUILD)/%.o,$(MP_CORE_SRCS)): CFLAGS := $(MP_CFLAGS) -w
@@ -189,7 +188,7 @@ $(patsubst %.c,$(BUILD)/%.o,$(MP_GLUE_SRCS) micropython-port/mp_port.c): \
 MP_LDFLAGS := -Wl,--wrap=nlr_jump_fail
 endif
 
-.PHONY: all clean distclean flash dfu size dump mp phi delta openocd help restore print-libs print-newlib
+.PHONY: all clean distclean flash dfu size dump mp phi delta openocd help print-libs print-newlib
 
 # Refuse to flash the image at an address it isn't linked for: it would
 # not run there (the vector table and every absolute address would be wrong).
@@ -267,8 +266,8 @@ openocd: $(BUILD)/$(TARGET).bin
 flash: $(BUILD)/$(TARGET).bin
 	$(call check_link_addr,0x90000000)
 	@if [ "$(CONFIRM)" != "overwrite-stock-firmware" ]; then \
-	  echo "This overwrites the stock NumWorks firmware at 0x90000000, and"; \
-	  echo "epsilon-qspi-backup.bin can NOT bring it back (see docs/BUILD.md,"; \
+	  echo "This overwrites the stock NumWorks firmware at 0x90000000. Only"; \
+	  echo "NumWorks' own recovery can bring it back (see docs/BUILD.md,"; \
 	  echo "'Restore Official Firmware')."; \
 	  echo "To go ahead anyway: make flash CONFIRM=overwrite-stock-firmware"; \
 	  exit 1; \
@@ -327,14 +326,4 @@ print-newlib:
 	@echo "Searching for stdint.h ..."
 	@find /usr/local /opt/homebrew -name stdint.h 2>/dev/null | grep -i "arm-none-eabi\|newlib" | head -8 || echo "  (none found)"
 
-# epsilon-qspi-backup.bin was taken after an old build of this OS had
-# already been flashed over the start of the stock firmware, so it can't
-# restore a bootable calculator. Refuse rather than flash it.
 -include $(OBJS:.o=.d)
-
-restore:
-	@echo "Refusing: epsilon-qspi-backup.bin is not a working stock image."
-	@echo "Its first 108 KB (0x0-0x1AFFF) is an old build of this OS, not the"
-	@echo "Epsilon kernel, so flashing it would leave the calculator unbootable."
-	@echo "Restore the official firmware as described in docs/BUILD.md."
-	@exit 1

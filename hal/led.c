@@ -27,6 +27,8 @@ static const struct { uint8_t port, pin; } PINS[3] = {
     { LED_R_PORT_NUM, LED_R_PIN }, { LED_G_PORT_NUM, LED_G_PIN }, { LED_B_PORT_NUM, LED_B_PIN },
 };
 static bool s_ok = false;
+static led_colour_t s_colour = LED_OFF;
+static bool s_suspended = false;
 
 static GPIO_TypeDef *port(uint8_t n) {
     return (GPIO_TypeDef *)(AHB1_BASE + 0x400UL * n);
@@ -54,9 +56,8 @@ void led_init(void) {
 
 bool led_available(void) { return s_ok; }
 
-void led_set(led_colour_t colour) {
+static void drive(led_colour_t colour) {
     static const uint8_t MASK[LED_COLOUR_COUNT] = { 0, 1, 2, 4, 7 };   /* bit 0=R 1=G 2=B */
-    if (!s_ok || colour >= LED_COLOUR_COUNT) return;
     for (int i = 0; i < 3; i++) {
         uint32_t pin = PINS[i].pin;
         bool on = MASK[colour] & (1U << i);
@@ -64,10 +65,23 @@ void led_set(led_colour_t colour) {
     }
 }
 
+void led_set(led_colour_t colour) {
+    if (!s_ok || colour >= LED_COLOUR_COUNT) return;
+    s_colour = colour;
+    if (!s_suspended) drive(colour);
+}
+
+led_colour_t led_get(void) { return s_colour; }
+void led_suspend(void) { s_suspended = true;  if (s_ok) drive(LED_OFF); }
+void led_resume(void)  { s_suspended = false; if (s_ok) drive(s_colour); }
+
 #else
 
 void led_init(void) {}
 bool led_available(void) { return false; }
 void led_set(led_colour_t colour) { (void)colour; }
+led_colour_t led_get(void) { return LED_OFF; }
+void led_suspend(void) {}
+void led_resume(void) {}
 
 #endif

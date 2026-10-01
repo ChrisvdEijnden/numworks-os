@@ -11,8 +11,8 @@
 #include "../../hal/keyboard.h"
 #include "../../fs/flashfs.h"
 #include "../../include/config.h"
-#include "../../include/string.h"
-#include "../../include/stdio.h"
+#include <string.h>
+#include <stdio.h>
 
 #include "../../usb/usb_host.h"
 
@@ -20,12 +20,14 @@
 #define C_HDR  RGB(30,80,200)
 #define HEADER_H 24
 #define MAX_FILES 32
+#define LIST_ROWS 13          /* rows between the header and the footer */
 #define IMG_MAX_W LCD_WIDTH
 #define IMG_MAX_H (LCD_HEIGHT - HEADER_H)
 
 static char  s_names[MAX_FILES][32];
 static int   s_nfiles = 0;
 static int   s_cursor = 0;
+static int   s_top = 0;       /* first file shown in the list */
 static bool  s_viewing = false;
 /* Images are streamed one scan line at a time into this buffer and
  * drawn straight into the framebuffer, so RAM use stays tiny. */
@@ -105,13 +107,22 @@ static void draw_file_list(void) {
         display_str(20, 60, "Geen afbeeldingen op USB.", RGB(180,180,180), C_BG);
         return;
     }
-    for (int i=0; i<s_nfiles && i<14; i++) {
+    /* Scroll so the cursor stays in view */
+    if (s_cursor >= s_nfiles) s_cursor = s_nfiles - 1;
+    if (s_cursor < s_top) s_top = s_cursor;
+    if (s_cursor >= s_top + LIST_ROWS) s_top = s_cursor - LIST_ROWS + 1;
+    for (int r = 0; r < LIST_ROWS && s_top + r < s_nfiles; r++) {
+        int i = s_top + r;
         bool sel = (i == s_cursor);
         uint16_t bg = sel ? RGB(50,80,180) : C_BG;
         uint16_t fg = sel ? WHITE : RGB(200,220,255);
-        display_fill_rect(0, HEADER_H+i*15, LCD_WIDTH, 15, bg);
-        display_str(6, HEADER_H+i*15+3, s_names[i], fg, bg);
+        display_fill_rect(0, HEADER_H+r*15, LCD_WIDTH, 15, bg);
+        display_str(6, HEADER_H+r*15+3, s_names[i], fg, bg);
     }
+    if (s_top > 0)
+        display_str(LCD_WIDTH-12, HEADER_H+3, "^", YELLOW, C_BG);
+    if (s_top + LIST_ROWS < s_nfiles)
+        display_str(LCD_WIDTH-12, HEADER_H+(LIST_ROWS-1)*15+3, "v", YELLOW, C_BG);
     display_str(4, LCD_HEIGHT-12, "EXE:Openen  HOME:Terug", YELLOW, C_BG);
 }
 
@@ -126,7 +137,7 @@ void photo_viewer_redraw(void) {
     }
 }
 
-void photo_viewer_init(void) { s_cursor=0; s_viewing=false; s_nfiles=0; }
+void photo_viewer_init(void) { s_cursor=0; s_top=0; s_viewing=false; s_nfiles=0; }
 
 void photo_viewer_handle_event(const kernel_event_t *ev) {
     if (ev->action != 0) return;

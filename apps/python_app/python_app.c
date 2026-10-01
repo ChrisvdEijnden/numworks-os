@@ -19,8 +19,8 @@
 #include "../../ui/line_input.h"
 #include "../../micropython-port/mp_port.h"
 #include "../../include/config.h"
-#include "../../include/string.h"
-#include "../../include/stdio.h"
+#include <string.h>
+#include <stdio.h>
 
 #define C_BG   RGB(10,10,20)
 #define C_HDR  RGB(30,150,30)
@@ -221,6 +221,7 @@ void python_app_handle_event(const kernel_event_t *ev) {
 
     if (k == KEY_HOME || k == KEY_BACK) {
         s_left = true;
+        mp_close_files();               /* save what the session left open */
         kernel_set_app(APP_HOME);
         return;
     }

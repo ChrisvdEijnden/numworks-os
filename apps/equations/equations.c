@@ -16,10 +16,10 @@
 #include "../../hal/keyboard.h"
 #include "../common/expr.h"
 #include "../../include/config.h"
-#include "../../include/string.h"
-#include "../../include/stdio.h"
-#include "../../include/stdlib.h"
-#include "../../include/math.h"
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
 
 #define C_BG  RGB(10,10,20)
 #define C_HDR RGB(30,80,200)

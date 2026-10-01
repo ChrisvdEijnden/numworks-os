@@ -7,8 +7,8 @@
 #include "../../hal/display.h"
 #include "../../hal/keyboard.h"
 #include "../../include/config.h"
-#include "../../include/string.h"
-#include "../../include/stdio.h"
+#include <string.h>
+#include <stdio.h>
 
 #define C_BG  RGB(10,10,20)
 #define C_HDR RGB(30,80,200)
@@ -36,9 +36,9 @@ static const doc_t DOCS[] = {
         "display.fill_rect(x,y,b,h,k)",
         "display.rgb(r,g,b) -> kleur",
         "display.flush() - tonen",
-        "open(naam).read()",
-        "BACK stopt een script",
-        "" }, 9 },
+        "open(n).read(), open(n,'w')",
+        "os.listdir() remove() stat()",
+        "BACK stopt een script" }, 10 },
     { "Rekenen",
       { "+ - * / ^  ( )  x  pi  e  Ans",
         "sin cos tan sqrt ln log exp",

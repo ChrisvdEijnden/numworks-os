@@ -12,8 +12,8 @@
 #include "../kernel/kernel.h"
 #include "../hal/hal.h"
 #include "../micropython-port/mp_port.h"
-#include "../include/string.h"
-#include "../include/stdlib.h"
+#include <string.h>
+#include <stdlib.h>
 
 /* ── Argument parsing (no malloc) ────────────────────────────── */
 #define MAX_ARGS 8

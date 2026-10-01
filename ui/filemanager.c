@@ -25,8 +25,8 @@
 #include "../kernel/kernel.h"
 #include "../shell/shell.h"
 #include "../apps/text_editor/text_editor.h"
-#include "../include/string.h"
-#include "../include/stdio.h"
+#include <string.h>
+#include <stdio.h>
 
 #define FM_VISIBLE_ROWS 12
 #define ITEM_H          16

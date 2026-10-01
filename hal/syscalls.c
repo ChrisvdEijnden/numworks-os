@@ -10,18 +10,16 @@
 extern int errno;
 int errno;
 
+#include <stdint.h>
+#include <stddef.h>
+#include <sys/stat.h>
 #include "hal.h"
-#include "../include/stdint.h"
-#include "../include/stddef.h"
 
-struct stat;
 extern void shell_putc(char c);
 
 int _close(int fd)                          { (void)fd; return -1; }
-/* Our include/sys/stat.h doesn't match newlib's struct stat, so don't
- * write through it: report "unknown" and newlib falls back to plain
- * buffering. */
-int _fstat(int fd, struct stat *st)         { (void)fd; (void)st; errno = EINVAL; return -1; }
+/* stdout is a character device, so newlib line-buffers it */
+int _fstat(int fd, struct stat *st)         { (void)fd; st->st_mode = S_IFCHR; return 0; }
 int _isatty(int fd)                         { (void)fd; return 1; }
 int _lseek(int fd, int ptr, int dir)        { (void)fd;(void)ptr;(void)dir; return 0; }
 int _read(int fd, char *ptr, int len)       { (void)fd;(void)ptr;(void)len; return 0; }
@@ -52,3 +50,22 @@ void _exit(int code) {
 }
 int _kill(int pid, int sig) { (void)pid; (void)sig; return -1; }
 int _getpid(void)           { return 1; }
+
+/* assert() failures (builds without NDEBUG) show the crash screen */
+void __assert_func(const char *file, int line, const char *func, const char *expr) {
+    (void)func; (void)expr;
+    static char msg[64];
+    int n = 0;
+    for (const char *p = "assert "; *p && n < 40; p++) msg[n++] = *p;
+    const char *base = file;
+    for (const char *p = file; *p; p++) if (*p == '/') base = p + 1;
+    for (const char *p = base; *p && n < 52; p++) msg[n++] = *p;
+    msg[n++] = ':';
+    char digits[10];
+    int d = 0;
+    unsigned v = (unsigned)line;
+    do { digits[d++] = (char)('0' + v % 10); v /= 10; } while (v && d < 10);
+    while (d && n < 62) msg[n++] = digits[--d];
+    msg[n] = 0;
+    hal_panic(msg);
+}

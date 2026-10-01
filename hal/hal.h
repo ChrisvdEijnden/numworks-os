@@ -6,6 +6,12 @@
 /* Subsystem init: debug UART, then the boot banner and reset cause */
 void hal_init(void);
 
+/* Independent watchdog: started once, can't be stopped. Anything that
+ * blocks for long must feed it (hal_delay_ms does). */
+void hal_watchdog_start(void);
+void hal_watchdog_feed(void);
+bool hal_reset_by_watchdog(void);   /* this boot followed a watchdog reset */
+
 /* One line on the debug UART: "[boot   123 ms] <stage>" */
 void hal_boot_log(const char *stage);
 

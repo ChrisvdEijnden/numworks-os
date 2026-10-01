@@ -24,15 +24,25 @@
 #define LCD_WIDTH           320
 #define LCD_HEIGHT          240
 #define LCD_BPP             16
+/* ST7789V memory access control (MADCTL, datasheet 9.1.28): MV (0x20)
+ * swaps rows and columns, which the 240x320 controller needs for a
+ * 320x240 picture. MY (0x80) / MX (0x40) mirror the image and depend on
+ * how the panel is mounted: 0xA0 (MY|MV) is believed to be NumWorks'
+ * landscape setting; try 0x60 or 0xE0 if the picture is mirrored, and
+ * add 0x08 if red and blue are swapped. */
+#define LCD_MADCTL          0xA0
+#define LCD_INVERT          0         /* 1: send INVON (some IPS panels) */
 
 /* ── Keyboard matrix ────────────────────────────────────────── */
 #define KEY_ROWS            9
 #define KEY_COLS            6
 
 /* ── Flash Filesystem ───────────────────────────────────────── */
-#define FFS_START           0x08070000UL
-#define FFS_SIZE            (64U * 1024U)
-#define FFS_SECTOR_NUM      7
+/* The last 256 KB of the 8 MB external flash (the linker script keeps
+ * the firmware out of them): two 128 KB areas, see fs/flashfs.h */
+#define STORAGE_OFFSET      0x7C0000UL
+#define STORAGE_SIZE        (256U * 1024U)
+#define FFS_AREA_SIZE       (STORAGE_SIZE / 2U)
 #define FFS_MAX_FILES       32
 #define FFS_NAME_LEN        24
 #define FFS_MAX_FILE_SIZE   (8U * 1024U)
@@ -75,6 +85,12 @@
 
 /* ── Text editor ────────────────────────────────────────────── */
 #define EDITOR_MAX_BYTES    FFS_MAX_FILE_SIZE   /* any file the FS can hold */
+
+/* ── Watchdog ───────────────────────────────────────────────── */
+/* Reset if the firmware stops feeding it for about 8 s (independent
+ * watchdog on the ~32 kHz LSI: /64, reload 4095). Set to 0 to disable,
+ * e.g. while debugging without a debugger attached. */
+#define WATCHDOG_ENABLED    1
 
 /* ── Power ──────────────────────────────────────────────────── */
 /* Screen off after this long without a key press (ON/OFF wakes) */

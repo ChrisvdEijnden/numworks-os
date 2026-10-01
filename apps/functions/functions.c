@@ -17,10 +17,10 @@
 #include "../../hal/keyboard.h"
 #include "../common/expr.h"
 #include "../../include/config.h"
-#include "../../include/string.h"
-#include "../../include/stdio.h"
-#include "../../include/math.h"
-#include "../../include/stdlib.h"
+#include <string.h>
+#include <stdio.h>
+#include <math.h>
+#include <stdlib.h>
 
 #define HEADER_H  28
 #define FOOTER_H  18

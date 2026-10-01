@@ -25,11 +25,34 @@ static const char *reset_cause(uint32_t csr) {
     return "unknown";
 }
 
+static bool s_wdg_reset;
+
+bool hal_reset_by_watchdog(void) { return s_wdg_reset; }
+
+void hal_watchdog_start(void) {
+#if WATCHDOG_ENABLED
+    DBGMCU_APB1_FZ |= DBGMCU_APB1_FZ_IWDG_STOP;   /* paused while a debugger halts us */
+    IWDG->KR  = 0xCCCCU;                          /* start (also starts the LSI) */
+    IWDG->KR  = 0x5555U;                          /* unlock PR/RLR */
+    IWDG->PR  = 4U;                               /* /64: 500 Hz */
+    IWDG->RLR = 4095U;                            /* ~8 s */
+    for (uint32_t n = 0; n < 1000000U && IWDG->SR; n++) {}   /* registers updated */
+    IWDG->KR  = 0xAAAAU;
+#endif
+}
+
+/* Fed even with WATCHDOG_ENABLED 0: a watchdog started earlier (by a
+ * bootloader) can't be stopped, and feeding a stopped one does nothing. */
+void hal_watchdog_feed(void) {
+    IWDG->KR = 0xAAAAU;
+}
+
 void hal_init(void) {
     /* UART for debug output */
     hal_uart_init();
     hal_uart_puts("\r\nNumWorks OS v" NWOS_VERSION " booting...\r\n");
     hal_uart_puts("reset cause: ");
+    s_wdg_reset = (RCC_CSR & (1U << 29)) != 0;
     hal_uart_puts(reset_cause(RCC_CSR));
     hal_uart_puts(g_boot_hse ? "\nclock: 216 MHz from HSE\n"
                              : "\nclock: 216 MHz from HSI (crystal did not start)\n");
@@ -98,6 +121,7 @@ uint32_t hal_tick_ms(void) {
 }
 
 void hal_delay_ms(uint32_t ms) {
+    hal_watchdog_feed();
     uint32_t start = g_tick_ms;
     while ((g_tick_ms - start) < ms) {
         __asm volatile("wfi");

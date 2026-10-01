@@ -24,9 +24,9 @@
 #include "../hal/hal.h"
 #include "../include/stm32f730.h"
 #include "../include/config.h"
-#include "../include/string.h"
-#include "../include/stdio.h"
-#include "../include/stdlib.h"
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 /* ── OTG_FS register map (simplified) ───────────────────────── */
 #define OTG_FS_BASE 0x50000000UL

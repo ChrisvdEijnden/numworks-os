@@ -22,8 +22,8 @@
 #include "../hal/font.h"
 #include "../ui/line_input.h"
 #include "../include/config.h"
-#include "../include/string.h"
-#include "../include/stdio.h"
+#include <string.h>
+#include <stdio.h>
 #include <stdarg.h>
 
 #define COLS    40

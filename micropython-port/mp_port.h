@@ -31,6 +31,11 @@ bool mp_exec_file(const char *name);
  * printed, as at the >>> prompt */
 void mp_exec_repl(const char *code);
 
+/* Save and close files opened for writing that are still open (done
+ * after every script; the Python app does it when it is left).
+ * Returns how many couldn't be saved. */
+int mp_close_files(void);
+
 /* Forget imported modules, so the next import reads the file again
  * (mp_exec_file does this before each run) */
 void mp_forget_imports(void);

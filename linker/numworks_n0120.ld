@@ -19,13 +19,18 @@
  *
  * SRAM1+SRAM2 layout:
  *   0x20010000  .framebuf   153,600 B  (320*240*2)
- *   then        .data, .bss
+ *   then        .data (with .ramfunc: code that must run from RAM
+ *               while the external flash is being written), .bss
  *   then        newlib _sbrk heap up to 0x20040000
+ *
+ * QSPI: the last 256 KB of the 8 MB flash hold the file system
+ * (STORAGE_OFFSET / STORAGE_SIZE in include/config.h), so the image
+ * may not grow into them.
  * ================================================================ */
 
 MEMORY
 {
-  QSPI  (rx)  : ORIGIN = 0x90000000, LENGTH = 8M
+  QSPI  (rx)  : ORIGIN = 0x90000000, LENGTH = 8M - 256K
   DTCM  (rwx) : ORIGIN = 0x20000000, LENGTH = 64K
   RAM   (rwx) : ORIGIN = 0x20010000, LENGTH = 192K
 }
@@ -87,6 +92,7 @@ SECTIONS
   {
     . = ALIGN(4);
     _sdata = .;
+    *(.ramfunc*)
     *(.data*)
     . = ALIGN(4);
     _edata = .;

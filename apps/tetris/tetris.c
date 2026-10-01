@@ -12,8 +12,8 @@
 #include "../../hal/timer.h"
 #include "../../hal/hal.h"
 #include "../../include/config.h"
-#include "../../include/string.h"
-#include "../../include/stdio.h"
+#include <string.h>
+#include <stdio.h>
 
 #define BW    TETRIS_BOARD_W
 #define BH    TETRIS_BOARD_H

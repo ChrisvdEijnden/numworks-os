@@ -11,10 +11,10 @@
  * so -2^2 = -4 and 2^3^2 = 2^9, as on paper.
  * ================================================================ */
 #include "expr.h"
-#include "../../include/math.h"
-#include "../../include/stdio.h"
-#include "../../include/stdlib.h"
-#include "../../include/string.h"
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define MAX_DEPTH 96    /* bounds recursion (3 levels per parenthesis) */
 #define MAX_NAME  8

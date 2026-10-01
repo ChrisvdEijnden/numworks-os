@@ -165,6 +165,20 @@ typedef struct { vu32 CTRL; vu32 LOAD; vu32 VAL; vu32 CALIB; } SysTick_Type;
 #define MPU_RASR_AP_FULL     (3U<<24)
 #define MPU_RASR_XN          (1U<<28)
 
+/* QUADSPI (RM0431 §14.5). The external flash the firmware runs from. */
+typedef struct {
+    vu32 CR; vu32 DCR; vu32 SR; vu32 FCR; vu32 DLR; vu32 CCR; vu32 AR;
+    vu32 ABR; vu32 DR; vu32 PSMKR; vu32 PSMAR; vu32 PIR; vu32 LPTR;
+} QUADSPI_TypeDef;
+#define QUADSPI ((QUADSPI_TypeDef *)0xA0001000UL)
+#define RCC_AHB3ENR_QSPIEN  (1U<<1)
+
+/* Independent watchdog (RM0431 §27) */
+typedef struct { vu32 KR; vu32 PR; vu32 RLR; vu32 SR; vu32 WINR; } IWDG_TypeDef;
+#define IWDG ((IWDG_TypeDef *)(APB1_BASE + 0x3000UL))
+#define DBGMCU_APB1_FZ (*(volatile uint32_t *)0xE0042008UL)
+#define DBGMCU_APB1_FZ_IWDG_STOP (1U<<12)
+
 /* NVIC */
 #define NVIC_BASE 0xE000E100UL
 typedef struct { vu32 ISER[8]; uint32_t R[24]; vu32 ICER[8]; } NVIC_Type;

@@ -6,7 +6,7 @@
 #include "../hal/hal.h"
 #include "../hal/display.h"
 #include "../hal/keyboard.h"
-#include "../include/string.h"
+#include <string.h>
 
 bool line_input(char *buf, int max,
                 void (*draw)(const char *text, bool shift, bool alpha)) {

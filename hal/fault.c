@@ -9,10 +9,11 @@
  * interrupts, SysTick or the heap.
  * ================================================================ */
 #include "fault.h"
+#include "hal.h"
 #include "uart.h"
 #include "display.h"
 #include "keyboard.h"
-#include "../include/string.h"
+#include <string.h>
 
 #define SCB_AIRCR (*(volatile uint32_t *)0xE000ED0CUL)
 #define SCB_CFSR  (*(volatile uint32_t *)0xE000ED28UL)
@@ -78,6 +79,7 @@ static void add_dec(const char *label, uint32_t v) {
 /* Busy wait: SysTick can't interrupt a fault handler. Rough, but only
  * used for key debouncing. */
 static void spin_ms(uint32_t ms) {
+    hal_watchdog_feed();          /* the report stays up until a key */
     for (volatile uint32_t i = 0; i < ms * 20000U; i++) {}
 }
 

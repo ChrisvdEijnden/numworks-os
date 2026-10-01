@@ -15,8 +15,8 @@
 #include "../../include/config.h"
 #include "../../hal/led.h"
 #include "../../hal/fault.h"
-#include "../../include/string.h"
-#include "../../include/stdio.h"
+#include <string.h>
+#include <stdio.h>
 
 #define C_BG   RGB(10,10,20)
 #define C_HDR  RGB(60,60,80)

@@ -7,6 +7,7 @@
 #include "../hal/hal.h"
 #include "../hal/display.h"
 #include "../hal/keyboard.h"
+#include "../hal/led.h"
 #include "../shell/shell.h"
 #include "../ui/filemanager.h"
 #include "../usb/usb_cdc.h"
@@ -21,7 +22,7 @@
 #include "../apps/settings/settings.h"
 #include "../apps/photo_viewer/photo_viewer.h"
 #include "../apps/text_editor/text_editor.h"
-#include "../include/string.h"
+#include <string.h>
 
 static kernel_t  g_kernel;
 static volatile bool s_redraw_pending = false;
@@ -52,6 +53,7 @@ void kernel_run(void) {
     /* Each task sleeps one tick after it runs; when none is ready the
      * idle task puts the CPU to sleep until the next interrupt. */
     while (1) {
+        hal_watchdog_feed();
         scheduler_run_next();
     }
 }
@@ -78,6 +80,7 @@ void task_idle(void) {
 static void power_sleep(void) {
     hal_uart_puts("sleep\n");
     display_power(false);
+    led_suspend();
     hal_tick_set_period(SLEEP_TICK_MS);
     for (;;) {
         hal_delay_ms(SLEEP_TICK_MS);
@@ -89,6 +92,7 @@ static void power_sleep(void) {
         usb_cdc_process();
     }
     hal_tick_set_period(1);
+    led_resume();
     display_power(true);
     hal_uart_puts("wake\n");
     /* Keys queued before sleeping are stale */

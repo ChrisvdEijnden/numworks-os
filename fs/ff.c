@@ -10,7 +10,7 @@
  *   3. Rebuild — diskio.c already provides the disk_* layer
  * ================================================================ */
 #include "ff.h"
-#include "../include/string.h"
+#include <string.h>
 
 FRESULT f_mount   (FATFS *fs, const char *path, BYTE opt)
     { (void)fs;(void)path;(void)opt; return FR_NOT_ENABLED; }

@@ -24,8 +24,8 @@
 #include "../fs/diskio.h"
 #include "../include/stm32f730.h"
 #include "../include/config.h"
-#include "../include/string.h"
-#include "../include/stdio.h"
+#include <string.h>
+#include <stdio.h>
 
 /* OTG_FS register base (STM32F7) */
 #define OTG_FS_BASE   0x50000000UL

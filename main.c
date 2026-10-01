@@ -10,6 +10,7 @@
 #include "hal/led.h"
 #include "kernel/kernel.h"
 #include "fs/flashfs.h"
+#include "fs/storage.h"
 #include "shell/shell.h"
 #include "ui/filemanager.h"
 #include "usb/usb_cdc.h"
@@ -26,7 +27,7 @@
 #include "apps/photo_viewer/photo_viewer.h"
 #include "apps/text_editor/text_editor.h"
 #include "include/config.h"
-#include "include/string.h"
+#include <string.h>
 
 /* ── Boot splash ──────────────────────────────────────────────── */
 static void boot_splash(uint32_t ms_start) {
@@ -53,9 +54,46 @@ static void boot_splash(uint32_t ms_start) {
         }
     } while (elapsed < 1500);
 
+    if (hal_reset_by_watchdog())
+        display_str(10, 124, "Herstart na een vastloper (watchdog).", YELLOW, RGB(10,10,20));
     display_str(10, 140, "Klaar!", RGB(100,255,100), RGB(10,10,20));
     display_flush();
     hal_delay_ms(300);
+}
+
+/* ── Storage at boot ──────────────────────────────────────────── */
+static void boot_message(const char *a, const char *b, const char *c) {
+    const uint16_t bg = RGB(20,0,0);
+    display_fill(bg);
+    display_str(10, 20, a, YELLOW, bg);
+    if (b) display_str(10, 36, b, WHITE, bg);
+    if (c) display_str(10, 52, c, WHITE, bg);
+    display_flush();
+}
+
+/* No file system yet (first start) or an unreadable one. Formatting
+ * erases the storage area, so ask instead of doing it silently: if the
+ * flash driver misbehaves on this board, BACK keeps the calculator
+ * usable. */
+static int ask_format(void) {
+    boot_message("Geen bestandssysteem gevonden.",
+                 "OK: formatteren (wist de opslag)",
+                 "BACK: overslaan, niets wordt bewaard");
+    key_event_t ev;
+    for (;;) {
+        hal_delay_ms(10);
+        if (!keyboard_poll(&ev) || ev.action != 0) continue;
+        if (key_is_exe((key_code_t)ev.key)) break;
+        if (ev.key == KEY_BACK || ev.key == KEY_HOME) return FFS_ERR_FORMAT;
+    }
+    boot_message("Formatteren...", NULL, NULL);
+    int r = flashfs_format();
+    if (r != FFS_OK) {
+        boot_message("Formatteren mislukt.", storage_status(),
+                     "Bestanden worden niet bewaard.");
+        hal_delay_ms(2500);
+    }
+    return r;
 }
 
 /* ── Check if HOME key held at boot (go to shell) ─────────────── */
@@ -85,6 +123,7 @@ int main(void) {
 
     /* 1. HAL init */
     hal_init();
+    hal_watchdog_start();
     display_init();
     hal_boot_log("display");
     keyboard_init();
@@ -97,25 +136,17 @@ int main(void) {
     kernel_init();
     hal_boot_log("kernel");
 
-    /* 3. Flash FS. When it has to compact, it borrows the framebuffer as
-     *    scratch space and the current app is redrawn afterwards. */
-    flashfs_set_scratch(g_framebuf, sizeof(g_framebuf), kernel_request_redraw);
+    /* 3. File system on the external flash */
     int fs = flashfs_init();
-    if (fs == FFS_ERR_FORMAT) {
-        display_fill(RGB(20,0,0));
-        display_str(10, 20, "FS ongeldig - formatteren...", RED, RGB(20,0,0));
-        display_flush();
-        hal_delay_ms(800);
-        flashfs_format();
-    } else if (fs == FFS_ERR_NODEV) {
-        display_fill(RGB(20,0,0));
-        display_str(10, 20, "Geen flash-opslag gevonden.", RED, RGB(20,0,0));
-        display_str(10, 32, "Bestanden worden niet bewaard.", RED, RGB(20,0,0));
-        display_flush();
-        hal_delay_ms(1500);
+    hal_boot_log("storage:");
+    hal_boot_log(storage_status());
+    if (fs == FFS_ERR_FORMAT) fs = ask_format();
+    else if (fs == FFS_ERR_NODEV) {
+        boot_message("Geen opslag gevonden:", storage_status(),
+                     "Bestanden worden niet bewaard.");
+        hal_delay_ms(2000);
     }
-    hal_boot_log(fs == FFS_OK ? "flashfs: mounted" :
-                 fs == FFS_ERR_FORMAT ? "flashfs: formatted" : "flashfs: no storage");
+    hal_boot_log(fs == FFS_OK ? "flashfs: mounted" : "flashfs: not in use");
 
     /* 4. USB CDC (virtual serial for PC transfer) */
     usb_cdc_init();

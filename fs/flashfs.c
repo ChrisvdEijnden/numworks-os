@@ -1,26 +1,27 @@
 /* ================================================================
- * NumWorks OS — Internal Flash Filesystem Implementation
+ * NumWorks OS — Flash Filesystem Implementation
  * File: fs/flashfs.c
  *
- * Uses STM32F730 sector 7 (64 KB @ 0x0807_0000), as an append-only
- * record log plus data pool. See flashfs.h for the layout and the
- * power-loss behaviour.
+ * An append-only record log plus data pool in one of two flash areas
+ * (see flashfs.h for the layout and the power-loss behaviour). The
+ * flash itself is reached through fs/storage.h.
  *
- * Code size target: < 6 KB
+ * Offsets in the directory, and those handed to callers, are relative
+ * to the start of the storage region.
  * ================================================================ */
 #include "flashfs.h"
-#include "../include/stm32f730.h"
-#include "../include/config.h"
-#include "../include/string.h"
+#include "storage.h"
+#include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
+#define AREA_SIZE     FFS_AREA_SIZE
 #define SUPER_OFFSET  0x000U
 #define LOG_OFFSET    0x100U
-#define DATA_OFFSET   0x1000U
+#define DATA_OFFSET   0x4000U
 #define REC_SIZE      ((uint32_t)sizeof(ffs_entry_t))
-#define LOG_RECORDS   ((DATA_OFFSET - LOG_OFFSET) / REC_SIZE)   /* 96 */
+#define LOG_RECORDS   ((DATA_OFFSET - LOG_OFFSET) / REC_SIZE)   /* 403 */
 #define REC_COMMIT    ((uint32_t)offsetof(ffs_entry_t, flags))  /* programmed last */
-#define FS_END        (FFS_START + FFS_SIZE)
 
 /* Record kinds (the `flags` word). Anything else — including an erased
  * 0xFFFFFFFF left by a power cut before the commit — is ignored. */
@@ -30,91 +31,39 @@
 _Static_assert(sizeof(ffs_entry_t) == 40, "log record must stay 40 bytes");
 _Static_assert(sizeof(ffs_super_t) <= LOG_OFFSET, "superblock too large");
 _Static_assert((REC_COMMIT % 4) == 0, "commit word must be word aligned");
+_Static_assert(AREA_SIZE % STORAGE_ERASE_SIZE == 0, "areas must be whole erase blocks");
+_Static_assert(DATA_OFFSET < AREA_SIZE, "area too small");
 
-/* ── Flash sector operations ─────────────────────────────────── */
-static void flash_unlock(void) {
-    if (FLASH_R->CR & FLASH_CR_LOCK) {
-        FLASH_R->KEYR = FLASH_KEY1;
-        FLASH_R->KEYR = FLASH_KEY2;
-    }
-}
-static void flash_lock(void) {
-    FLASH_R->CR |= FLASH_CR_LOCK;
-}
+/* ── State ────────────────────────────────────────────────────── */
+static ffs_entry_t s_dir[FFS_MAX_FILES];   /* live files, offset in region */
+static uint32_t    s_count    = 0;
+static uint32_t    s_log_used = 0;         /* log records consumed         */
+static uint32_t    s_data_end = 0;         /* next free data, in the area  */
+static uint32_t    s_area     = 0;         /* active area: 0 or 1          */
+static uint32_t    s_gen      = 0;         /* its generation               */
+static bool        s_present  = false;     /* storage found                */
+static bool        s_mounted  = false;
 
-/* Wait for the operation to finish; report and clear error flags */
-static int flash_wait(void) {
-    __asm volatile("dsb" ::: "memory");
-    while (FLASH_R->SR & FLASH_SR_BSY) {}
-    uint32_t err = FLASH_R->SR & FLASH_SR_ERRORS;
-    FLASH_R->SR = err | FLASH_SR_EOP;   /* write 1 to clear */
-    return err ? -1 : 0;
-}
+static uint32_t align4(uint32_t v) { return (v + 3U) & ~3U; }
+static uint32_t area_base(uint32_t a) { return a * AREA_SIZE; }
+static const uint8_t *at(uint32_t off) { return storage_base() + off; }
 
 static bool all_erased(const uint8_t *p, uint32_t len) {
     for (uint32_t i = 0; i < len; i++) if (p[i] != 0xFF) return false;
     return true;
 }
 
-static int flash_erase_sector(uint8_t sector) {
-    FLASH_R->SR = FLASH_SR_ERRORS | FLASH_SR_EOP;
-    FLASH_R->CR  = FLASH_CR_SER | FLASH_CR_PSIZE_32 | FLASH_CR_SNB(sector);
-    FLASH_R->CR |= FLASH_CR_STRT;
-    int r = flash_wait();
-    FLASH_R->CR  = 0;
-    if (r == 0 && !all_erased((const uint8_t *)FFS_START, FFS_SIZE)) r = -1;
-    return r;
+/* Program erased flash and check that it took. Flash can clear bits
+ * but never set them, so programming anything but erased bytes would
+ * corrupt them. */
+static int prog(uint32_t off, const void *src, uint32_t len) {
+    if (len == 0) return 0;
+    const uint8_t *dst = at(off);
+    if (memcmp(dst, src, len) == 0) return 0;
+    if (!all_erased(dst, len)) return -1;
+    if (storage_program(off, src, len) != 0) return -1;
+    return memcmp(dst, src, len) == 0 ? 0 : -1;
 }
-
-/* Program one word. Only erased words may be programmed: flash can
- * clear bits but never set them, so anything else would corrupt it. */
-static int flash_program_word(uint32_t addr, uint32_t val) {
-    volatile uint32_t *p = (volatile uint32_t *)addr;
-    if (*p == val) return 0;
-    if (*p != 0xFFFFFFFFUL) return -1;
-    FLASH_R->SR = FLASH_SR_ERRORS | FLASH_SR_EOP;
-    FLASH_R->CR = FLASH_CR_PG | FLASH_CR_PSIZE_32;
-    *p = val;
-    int r = flash_wait();
-    FLASH_R->CR = 0;
-    return (r == 0 && *p == val) ? 0 : -1;
-}
-
-/* Program a byte range starting at a word boundary; pads with 0xFF */
-static int flash_program(uint32_t addr, const void *buf, uint32_t len) {
-    const uint8_t *src = (const uint8_t *)buf;
-    while (len) {
-        uint32_t w = 0xFFFFFFFFUL;
-        uint32_t n = len < 4 ? len : 4;
-        memcpy(&w, src, n);
-        if (flash_program_word(addr, w) != 0) return -1;
-        src += n; addr += 4; len -= n;
-    }
-    return 0;
-}
-
-/* FFS_START must be real flash on this part (a 64 KB STM32F730x8 has
- * no sector 7): reading or erasing past the end of flash faults. */
-static bool flash_present(void) {
-    uint32_t flash_end = FLASH_BASE_ADDR + (uint32_t)FLASH_SIZE_KB * 1024U;
-    return FFS_START >= FLASH_BASE_ADDR && FS_END <= flash_end;
-}
-
-/* ── In-RAM directory of live files ──────────────────────────── */
-static ffs_entry_t s_dir[FFS_MAX_FILES];   /* offset = absolute address */
-static uint32_t    s_count    = 0;
-static uint32_t    s_log_used = 0;         /* log records consumed       */
-static uint32_t    s_data_end = 0;         /* next free data address     */
-static bool        s_mounted  = false;
-
-static uint8_t    *s_scratch     = NULL;
-static uint32_t    s_scratch_len = 0;
-static void      (*s_scratch_released)(void) = NULL;
-
-/* Pointer to flash-mapped FS region */
-static const uint8_t *FS = (const uint8_t *)FFS_START;
-
-static uint32_t align4(uint32_t v) { return (v + 3U) & ~3U; }
 
 static bool name_ok(const char *name) {
     size_t n = strnlen(name, FFS_NAME_LEN);
@@ -144,29 +93,59 @@ static void set_entry(int idx, const char *name, uint32_t offset, uint32_t size)
 }
 
 static void make_record(ffs_entry_t *r, const char *name,
-                        uint32_t rel_offset, uint32_t size, uint32_t kind) {
+                        uint32_t area_offset, uint32_t size, uint32_t kind) {
     memset(r, 0xFF, sizeof(*r));
     memset(r->name, 0, FFS_NAME_LEN);
     strncpy(r->name, name, FFS_NAME_LEN - 1);
-    r->offset = rel_offset;
+    r->offset = area_offset;
     r->size   = size;
     r->flags  = kind;
 }
 
-/* Rebuild the RAM directory by replaying the log */
+/* ── Superblocks ──────────────────────────────────────────────── */
+static ffs_super_t read_super(uint32_t a) {
+    ffs_super_t sb;
+    memcpy(&sb, at(area_base(a) + SUPER_OFFSET), sizeof(sb));
+    return sb;
+}
+
+static bool super_valid(uint32_t a) {
+    ffs_super_t sb = read_super(a);
+    return sb.magic == FFS_MAGIC && sb.version == FFS_VERSION &&
+           sb.generation == ~sb.generation_inv;
+}
+
+/* Everything but the magic, then the magic: until that last word is
+ * programmed, the area doesn't count */
+static int write_super(uint32_t a, uint32_t generation) {
+    ffs_super_t sb;
+    memset(&sb, 0xFF, sizeof(sb));
+    sb.magic      = FFS_MAGIC;
+    sb.version    = FFS_VERSION;
+    sb.generation = generation;
+    sb.generation_inv = ~generation;
+    uint32_t base = area_base(a) + SUPER_OFFSET;
+    const uint8_t *p = (const uint8_t *)&sb;
+    if (prog(base + 4, p + 4, sizeof(sb) - 4) != 0) return -1;
+    return prog(base, p, 4);
+}
+
+/* ── Mount: pick the newest valid area and replay its log ────── */
 static int mount(void) {
     s_mounted  = false;
     s_count    = 0;
     s_log_used = 0;
-    s_data_end = FFS_START + DATA_OFFSET;
+    s_data_end = DATA_OFFSET;
 
-    const ffs_super_t *sb = (const ffs_super_t *)(FS + SUPER_OFFSET);
-    if (sb->magic != FFS_MAGIC || sb->version != FFS_VERSION)
-        return FFS_ERR_FORMAT;
+    bool v0 = super_valid(0), v1 = super_valid(1);
+    if (!v0 && !v1) return FFS_ERR_FORMAT;
+    s_area = (v1 && (!v0 || read_super(1).generation > read_super(0).generation)) ? 1 : 0;
+    s_gen  = read_super(s_area).generation;
+    uint32_t base = area_base(s_area);
 
     uint32_t i;
     for (i = 0; i < LOG_RECORDS; i++) {
-        const uint8_t *raw = FS + LOG_OFFSET + i * REC_SIZE;
+        const uint8_t *raw = at(base + LOG_OFFSET + i * REC_SIZE);
         if (all_erased(raw, REC_SIZE)) break;          /* end of log */
 
         ffs_entry_t r;
@@ -174,16 +153,16 @@ static int mount(void) {
         if (r.name[0] == 0 || !memchr(r.name, 0, FFS_NAME_LEN)) continue;
 
         if (r.flags == REC_FILE) {
-            if (r.offset < DATA_OFFSET || r.offset > FFS_SIZE || (r.offset & 3U) ||
-                r.size > FFS_SIZE - r.offset) continue;
-            uint32_t end = FFS_START + r.offset + align4(r.size);
+            if (r.offset < DATA_OFFSET || r.offset > AREA_SIZE || (r.offset & 3U) ||
+                r.size > AREA_SIZE - r.offset) continue;
+            uint32_t end = r.offset + align4(r.size);
             if (end > s_data_end) s_data_end = end;
             int idx = find_entry(r.name);
             if (idx < 0) {
                 if (s_count >= FFS_MAX_FILES) continue;
                 idx = (int)s_count++;
             }
-            set_entry(idx, r.name, FFS_START + r.offset, r.size);
+            set_entry(idx, r.name, base + r.offset, r.size);
         } else if (r.flags == REC_DEL) {
             int idx = find_entry(r.name);
             if (idx >= 0) remove_entry(idx);
@@ -194,8 +173,8 @@ static int mount(void) {
 
     /* Data written for a record that never got committed still occupies
      * flash: never hand that space out again. */
-    uint32_t w = FS_END;
-    while (w > s_data_end && *(const uint32_t *)(w - 4) == 0xFFFFFFFFUL) w -= 4;
+    uint32_t w = AREA_SIZE;
+    while (w > s_data_end && all_erased(at(base + w - 4), 4)) w -= 4;
     if (w > s_data_end) s_data_end = w;
 
     s_mounted = true;
@@ -203,119 +182,95 @@ static int mount(void) {
 }
 
 /* Append one record; it only takes effect once its kind is programmed */
-static int log_append(const char *name, uint32_t abs_offset,
+static int log_append(const char *name, uint32_t region_offset,
                       uint32_t size, uint32_t kind) {
     if (s_log_used >= LOG_RECORDS) return -1;
+    uint32_t base = area_base(s_area);
     ffs_entry_t r;
-    make_record(&r, name, abs_offset - FFS_START, size, kind);
-    uint32_t addr = FFS_START + LOG_OFFSET + s_log_used * REC_SIZE;
+    make_record(&r, name, region_offset - base, size, kind);
+    uint32_t off = base + LOG_OFFSET + s_log_used * REC_SIZE;
     s_log_used++;   /* consumed even if programming fails */
-    if (flash_program(addr, &r, REC_COMMIT) != 0) return -1;
-    return flash_program_word(addr + REC_COMMIT, kind);
+    if (prog(off, &r, REC_COMMIT) != 0) return -1;
+    return prog(off + REC_COMMIT, &kind, sizeof(kind));
 }
 
-/* ── Compaction ──────────────────────────────────────────────── */
+/* ── Compaction into the other area ───────────────────────────── */
 typedef enum { MOD_WRITE, MOD_DELETE, MOD_RENAME } mod_t;
 
-/* Write the live files, with one change applied, into a fresh sector */
-static int compact(mod_t mod, const char *name, const void *data,
-                   uint32_t len, const char *new_name) {
-    if (!s_scratch || s_scratch_len < FFS_SIZE) return -1;
+typedef struct {
+    mod_t       mod;
+    const char *name, *new_name;
+    const void *data;
+    uint32_t    len;
+} change_t;
 
-    /* Stage the whole image in RAM first: once the sector is erased,
-     * the old file contents are gone. */
-    uint8_t *img = s_scratch;
-    memset(img, 0xFF, FFS_SIZE);
-    uint32_t cur = DATA_OFFSET, nrec = 0;
-    bool done = false, fits = true;
-
-    for (uint32_t i = 0; i <= s_count && fits; i++) {
+/* The live files with one change applied, laid out in area `a`. With
+ * write=false this only checks that they fit. */
+static int lay_out(uint32_t a, const change_t *c, bool write) {
+    uint32_t base = area_base(a), cur = DATA_OFFSET, nrec = 0;
+    bool done = false;
+    for (uint32_t i = 0; i <= s_count; i++) {
         const char *nm;
         const void *src;
         uint32_t sz;
         if (i < s_count) {
             nm  = s_dir[i].name;
-            src = (const void *)s_dir[i].offset;
+            src = at(s_dir[i].offset);
             sz  = s_dir[i].size;
-            if (strncmp(nm, name, FFS_NAME_LEN) == 0) {
-                if (mod == MOD_DELETE) continue;
-                if (mod == MOD_RENAME) nm = new_name;
-                if (mod == MOD_WRITE)  { src = data; sz = len; done = true; }
+            if (strncmp(nm, c->name, FFS_NAME_LEN) == 0) {
+                if (c->mod == MOD_DELETE) continue;
+                if (c->mod == MOD_RENAME) nm = c->new_name;
+                if (c->mod == MOD_WRITE)  { src = c->data; sz = c->len; done = true; }
             }
         } else {
-            if (mod != MOD_WRITE || done) break;   /* new file goes last */
-            nm = name; src = data; sz = len;
+            if (c->mod != MOD_WRITE || done) break;   /* a new file goes last */
+            nm = c->name; src = c->data; sz = c->len;
         }
-        if (nrec >= LOG_RECORDS || cur > FFS_SIZE || align4(sz) > FFS_SIZE - cur) {
-            fits = false;
-            break;
+        if (nrec >= LOG_RECORDS || align4(sz) > AREA_SIZE - cur) return -1;
+        if (write) {
+            ffs_entry_t r;
+            make_record(&r, nm, cur, sz, REC_FILE);
+            uint32_t roff = base + LOG_OFFSET + nrec * REC_SIZE;
+            if (prog(base + cur, src, sz) != 0 ||
+                prog(roff, &r, REC_COMMIT) != 0 ||
+                prog(roff + REC_COMMIT, &r.flags, sizeof(r.flags)) != 0) return -1;
         }
-        if (sz) memcpy(img + cur, src, sz);
-        ffs_entry_t r;
-        make_record(&r, nm, cur, sz, REC_FILE);
-        memcpy(img + LOG_OFFSET + nrec * REC_SIZE, &r, sizeof(r));
         nrec++;
         cur += align4(sz);
     }
+    return 0;
+}
 
-    int r = fits ? 0 : -1;
-    if (r == 0) {
-        flash_unlock();
-        r = flash_erase_sector(FFS_SECTOR_NUM);
-        /* Data, then records (each committed by its kind word), and the
-         * superblock last: an interrupted compaction reads back as
-         * "needs formatting", never as a half-valid filesystem. */
-        if (r == 0) r = flash_program(FFS_START + DATA_OFFSET,
-                                      img + DATA_OFFSET, cur - DATA_OFFSET);
-        for (uint32_t j = 0; r == 0 && j < nrec; j++) {
-            uint32_t off = LOG_OFFSET + j * REC_SIZE;
-            r = flash_program(FFS_START + off, img + off, REC_COMMIT);
-            if (r == 0) r = flash_program_word(FFS_START + off + REC_COMMIT, REC_FILE);
-        }
-        if (r == 0) {
-            ffs_super_t sb;
-            memset(&sb, 0xFF, sizeof(sb));
-            sb.magic   = FFS_MAGIC;
-            sb.version = FFS_VERSION;
-            r = flash_program(FFS_START + SUPER_OFFSET, &sb, sizeof(sb));
-        }
-        flash_lock();
-    }
-
-    if (s_scratch_released) s_scratch_released();
+static int compact(const change_t *c) {
+    uint32_t to = 1U - s_area;
+    if (lay_out(to, c, false) != 0) return -1;          /* doesn't fit */
+    /* The old area stays untouched (and valid) until the new one is
+     * complete, so a failure or power cut here loses nothing. */
+    int r = storage_erase(area_base(to), AREA_SIZE);
+    if (r == 0) r = lay_out(to, c, true);
+    if (r == 0) r = write_super(to, s_gen + 1U);
     int m = mount();
     return (r == 0 && m == FFS_OK) ? 0 : -1;
 }
 
 /* ── Public API ──────────────────────────────────────────────── */
-void flashfs_set_scratch(void *buf, uint32_t len, void (*released)(void)) {
-    s_scratch          = (uint8_t *)buf;
-    s_scratch_len      = len;
-    s_scratch_released = released;
-}
-
 int flashfs_init(void) {
     s_mounted = false;
     s_count   = 0;
-    if (!flash_present()) return FFS_ERR_NODEV;
+    s_present = storage_init();
+    if (!s_present) return FFS_ERR_NODEV;
     return mount();
 }
 
 int flashfs_format(void) {
     s_mounted = false;
     s_count   = 0;
-    if (!flash_present()) return FFS_ERR_NODEV;
-
-    ffs_super_t sb;
-    memset(&sb, 0xFF, sizeof(sb));
-    sb.magic   = FFS_MAGIC;
-    sb.version = FFS_VERSION;
-
-    flash_unlock();
-    int r = flash_erase_sector(FFS_SECTOR_NUM);
-    if (r == 0) r = flash_program(FFS_START + SUPER_OFFSET, &sb, sizeof(sb));
-    flash_lock();
-    if (r != 0) return -1;
+    if (!s_present) return FFS_ERR_NODEV;
+    /* Both areas: an old superblock left in either could outrank the
+     * new one */
+    if (storage_erase(area_base(1), AREA_SIZE) != 0 ||
+        storage_erase(area_base(0), AREA_SIZE) != 0 ||
+        write_super(0, 1) != 0) return -1;
     return mount();
 }
 
@@ -330,14 +285,14 @@ int flashfs_open_read(const char *path, uint32_t *offset, uint32_t *size) {
 bool flashfs_map(const char *path, const char **data, uint32_t *size) {
     uint32_t offset;
     if (flashfs_open_read(path, &offset, size) != 0) return false;
-    *data = (const char *)(uintptr_t)offset;
+    *data = (const char *)at(offset);
     return true;
 }
 
 int flashfs_read(uint32_t offset, void *buf, uint32_t len) {
-    if (offset < FFS_START + DATA_OFFSET || offset > FS_END ||
-        len > FS_END - offset) return -1;
-    memcpy(buf, (const void *)offset, len);
+    uint32_t lo = area_base(s_area) + DATA_OFFSET, hi = area_base(s_area) + AREA_SIZE;
+    if (!s_mounted || offset < lo || offset > hi || len > hi - offset) return -1;
+    memcpy(buf, at(offset), len);
     return (int)len;
 }
 
@@ -349,22 +304,20 @@ int flashfs_write(const char *path, const void *data, uint32_t len) {
     if (idx < 0 && s_count >= FFS_MAX_FILES) return -1;
 
     uint32_t need = align4(len);
-    if (s_log_used < LOG_RECORDS && need <= FS_END - s_data_end) {
+    if (s_log_used < LOG_RECORDS && need <= AREA_SIZE - s_data_end) {
         /* Append the data, then the record that points at it */
-        uint32_t off = s_data_end;
+        uint32_t off = area_base(s_area) + s_data_end;
         s_data_end += need;   /* consumed even if programming fails */
-        flash_unlock();
-        int r = flash_program(off, data, len);
-        if (r == 0) r = log_append(path, off, len, REC_FILE);
-        flash_lock();
-        if (r != 0) return -1;
+        if (prog(off, data, len) != 0 || log_append(path, off, len, REC_FILE) != 0)
+            return -1;
         if (idx < 0) idx = (int)s_count++;
         set_entry(idx, path, off, len);
         return (int)len;
     }
 
     /* Log or data pool full: compact, with the new contents in place */
-    return compact(MOD_WRITE, path, data, len, NULL) == 0 ? (int)len : -1;
+    change_t c = { MOD_WRITE, path, NULL, data, len };
+    return compact(&c) == 0 ? (int)len : -1;
 }
 
 int flashfs_delete(const char *path) {
@@ -373,14 +326,12 @@ int flashfs_delete(const char *path) {
     if (idx < 0) return -1;
 
     if (s_log_used < LOG_RECORDS) {
-        flash_unlock();
-        int r = log_append(path, FFS_START + DATA_OFFSET, 0, REC_DEL);
-        flash_lock();
-        if (r != 0) return -1;
+        if (log_append(path, area_base(s_area) + DATA_OFFSET, 0, REC_DEL) != 0) return -1;
         remove_entry(idx);
         return 0;
     }
-    return compact(MOD_DELETE, path, NULL, 0, NULL);
+    change_t c = { MOD_DELETE, path, NULL, NULL, 0 };
+    return compact(&c);
 }
 
 int flashfs_rename(const char *from, const char *to) {
@@ -392,15 +343,14 @@ int flashfs_rename(const char *from, const char *to) {
     if (s_log_used + 2 <= LOG_RECORDS) {
         /* New name first: a power cut in between leaves both names,
          * never neither. */
-        flash_unlock();
         int r = log_append(to, s_dir[idx].offset, s_dir[idx].size, REC_FILE);
-        if (r == 0) r = log_append(from, FFS_START + DATA_OFFSET, 0, REC_DEL);
-        flash_lock();
+        if (r == 0) r = log_append(from, area_base(s_area) + DATA_OFFSET, 0, REC_DEL);
         if (r != 0) { mount(); return -1; }   /* resync with what's on flash */
         set_entry(idx, to, s_dir[idx].offset, s_dir[idx].size);
         return 0;
     }
-    return compact(MOD_RENAME, from, NULL, 0, to);
+    change_t c = { MOD_RENAME, from, to, NULL, 0 };
+    return compact(&c);
 }
 
 bool flashfs_mounted(void) {
@@ -420,5 +370,5 @@ void flashfs_stats(uint32_t *used, uint32_t *free_bytes) {
     uint32_t u = 0;
     for (uint32_t i = 0; i < s_count; i++) u += align4(s_dir[i].size);
     if (used)       *used       = u;
-    if (free_bytes) *free_bytes = (FFS_SIZE - DATA_OFFSET) - u;
+    if (free_bytes) *free_bytes = (AREA_SIZE - DATA_OFFSET) - u;
 }

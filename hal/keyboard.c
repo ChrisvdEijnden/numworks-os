@@ -11,8 +11,8 @@
 #include "uart.h"
 #include "../include/stm32f730.h"
 #include "../include/config.h"
-#include "../include/string.h"
-#include "../include/stdio.h"
+#include <string.h>
+#include <stdio.h>
 
 /* Keyboard matrix GPIO mapping — NOT verified against a schematic (kept
  * from the original code); check before relying on it.

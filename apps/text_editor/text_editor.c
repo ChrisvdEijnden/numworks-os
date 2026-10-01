@@ -16,8 +16,8 @@
 #include "../../hal/keyboard.h"
 #include "../../fs/flashfs.h"
 #include "../../include/config.h"
-#include "../../include/string.h"
-#include "../../include/stdio.h"
+#include <string.h>
+#include <stdio.h>
 
 #define C_BG   RGB(10,12,18)
 #define C_HDR  RGB(30,80,200)

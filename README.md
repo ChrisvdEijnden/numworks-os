@@ -21,7 +21,7 @@ manager, a text editor and Tetris.
 | **Rekenmachine** | Calculator | Scientific calculator, `Ans`, inverse functions | Works (native evaluator) |
 | **Functies** | Functions | Up to 4 functions: graph (pan/zoom), table; edit/delete | Works |
 | **Vergelijkingen** | Equations | Quadratic, 2×2 linear system, f(x)=0 (Newton) | Works |
-| **Python** | Python REPL | MicroPython: multi-line blocks, `input()`, import your own `.py` files, `math`, `time`, `random`, `display`, read-only `open()` | Needs `make mp` |
+| **Python** | Python REPL | MicroPython: multi-line blocks, `input()`, import your own `.py` files, `math`, `time`, `random`, `os`, `display`, `open()` to read and write files | Needs `make mp` |
 | **Bestanden** | File manager | Open in editor, new file, delete (SHIFT twice) | Works |
 | **Shell** | Shell | `ls cat touch rm echo run mem fm reboot`; also over UART | Works |
 | **Tetris** | Tetris | Classic Tetris | Works |
@@ -49,7 +49,15 @@ Navigate with the arrow keys, **OK** (or **EXE**) opens or confirms,
   press); ON/OFF turns it back on. The backlight pin isn't known yet,
   so the backlight itself stays on.
 - After a crash the screen shows the fault and its address; any key
-  restarts. The same report goes to the debug UART.
+  restarts. The same report goes to the debug UART. If the calculator
+  hangs, the watchdog restarts it after about 8 seconds.
+- On the first start (or if the file storage is damaged) the calculator
+  asks whether to format the storage: **OK** formats, **BACK** goes on
+  without files.
+
+Files are kept in the last 256 KB of the external flash, in two halves;
+tidying up writes the other half first, so a power cut can't lose
+files that were already saved.
 
 ## Home screen
 
@@ -72,8 +80,7 @@ numworks-os/
 ├── Makefile
 ├── main.c                      Boot sequence
 ├── linker/
-│   ├── numworks_n0120.ld       Linker script (QSPI XIP @ 0x90000000)
-│   └── numworks.ld             Legacy, unused (wrong memory map)
+│   └── numworks_n0120.ld       Linker script (QSPI XIP @ 0x90000000)
 ├── include/
 │   ├── config.h                Central configuration
 │   └── stm32f730.h             Register definitions
@@ -84,7 +91,8 @@ numworks-os/
 ├── hal/                        LCD, keyboard, UART, timer, LED,
 │                               crash screen, newlib stubs
 ├── fs/
-│   ├── flashfs.c/h             Flash file system (append-only log)
+│   ├── flashfs.c/h             File system (append-only log, two areas)
+│   ├── storage_qspi.c          QSPI flash driver (AT25SF641), runs from RAM
 │   ├── ff.c / ff.h             FatFs stub (replace with real FatFs)
 │   └── diskio.c/h              FatFs drive glue (drive 1 = USB)
 ├── shell/                      Terminal UI + commands
@@ -99,7 +107,7 @@ numworks-os/
 │   ├── mpconfigport.h          MicroPython configuration
 │   ├── micropython_embed.mk    Used by `make mp`
 │   ├── shared/readline/        input() hook (replaces MicroPython's)
-│   └── modules/nwos/           `display`, `time`, `random`, open()
+│   └── modules/nwos/           `display`, `time`, `random`, `os`, open()
 ├── apps/
 │   ├── common/expr.c/h         Expression evaluator (math apps)
 │   └── <app>/                  One directory per app
@@ -134,13 +142,16 @@ confirmation because it overwrites the stock firmware.
   `handle_event()`; apps that work between key presses also have a
   `tick()` (Tetris, Shell).
 - All drawing goes into a framebuffer through `display_*()`; the kernel
-  pushes it to the LCD when something changed.
+  sends the changed rectangle to the LCD (ST7789V).
 - `kernel_set_app()` switches apps. Tasks sleep between ticks and the
   CPU waits in `WFI` when idle.
 
 ## License
 
-The code in this repository is MIT licensed. MicroPython (`make mp`)
-and FatFs keep their own licenses. `epsilon-qspi-backup.bin` is a dump
-of NumWorks' own firmware: it is not covered by this repository's
-license.
+The code in this repository is MIT licensed (see `LICENSE`).
+MicroPython (`make mp`) and FatFs keep their own licenses; the `random`
+module is adapted from MicroPython's (MIT).
+
+Earlier versions of this repository contained a dump of NumWorks'
+firmware (`epsilon-qspi-backup.bin`). It was removed: it isn't ours to
+distribute, and it couldn't restore a calculator anyway.
