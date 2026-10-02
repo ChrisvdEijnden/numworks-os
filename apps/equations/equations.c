@@ -215,9 +215,9 @@ void equations_redraw(void) {
     /* Mode tabs */
     const char *tabs[] = {TR("Kwadratisch", "Quadratic"), TR("Lineair", "Linear"), TR("Enkelvoudig", "Single")};
     for (int i = 0; i < 3; i++) {
-        uint16_t tc = (i==s_mode) ? WHITE : RGB(150,150,200);
+        uint16_t tc = (i==(int)s_mode) ? WHITE : RGB(150,150,200);
         display_str(4 + i*107, HEADER_H+1, tabs[i], tc,
-                    (i==s_mode) ? RGB(50,80,160) : C_BG);
+                    (i==(int)s_mode) ? RGB(50,80,160) : C_BG);
     }
     switch(s_mode) {
         case MODE_QUAD:   draw_quad();   break;

@@ -481,3 +481,30 @@ The RGB LED is driven by TIM3 in PWM mode on PB4/PB5/PB0 (high = lit,
 4.8 kHz, at most a quarter duty). With USB power it shows the charge
 state (orange: charging, green: full) instead of the colour chosen in
 Settings, also while asleep.
+
+## Simulator
+
+`sim/` runs the OS on a PC (`make run-sim`; using it is described in
+`docs/BUILD.md`). The OS's own `main()` runs unchanged in a thread with
+a 1 MB stack of its own, which stands in for the linker script's stack
+region (`_sstack`..`_estack`, used by MicroPython and `mem`); the main
+thread keeps the window (SDL2). The cut is as low as possible:
+
+- **real**: all of the OS above the HAL, and three drivers: the display
+  (`hal/display.c`), the keyboard (`hal/keyboard.c`) and the crash
+  screen (`hal/fault.c`). The display driver and crash screen are
+  copies made by `tests/gen_host.py`, with register accesses turned
+  into calls; the kernel's copy turns WFI into a wait for the next tick;
+- **simulated in detail**: the ST7789V (power and reset pins, sleep,
+  display on, inversion, the column/row window and frame memory), so
+  the window shows what the driver actually sent; the key matrix the
+  keyboard driver scans; the QSPI flash's rules (erase to FF, program
+  clears bits), kept in a file; and the USB core, replaced by a
+  pseudo-terminal behind the real transfer protocol (`usb/usb_cdc.c`);
+- **simple stand-ins**: SysTick (its ticks run in the OS thread,
+  whenever the OS asks the time, waits or sleeps, so no other thread
+  touches the scheduler), the UART (stdout and stdin), clocks, LED,
+  backlight and battery.
+
+A restart (`hal_reset()`) re-executes the simulator; the storage file
+stays.

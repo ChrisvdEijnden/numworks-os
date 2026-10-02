@@ -69,7 +69,9 @@ write('fault_host.c', absolute_includes(s, src), src, ['asm', '0xE000'])
 src = 'kernel/kernel.c'
 s = read(src)
 s = re.sub(r'__asm volatile\("[a-z ]*" ::: "memory"\);', '', s)
-s = replace(s, '__asm volatile("wfi");', '{}', src)
+s = replace(s, '__asm volatile("wfi");', 'HOST_WFI();', src)
+s = ('/* WFI: nothing in the tests; the simulator waits for the next tick */\n'
+     '#ifndef HOST_WFI\n#define HOST_WFI() ((void)0)\n#endif\n') + s
 write('kernel_host.c', absolute_includes(s, src), src, ['asm'])
 
 # ── hal/display.c: the FMC bus to the panel ─────────────────────────────

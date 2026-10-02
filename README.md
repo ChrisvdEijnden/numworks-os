@@ -95,6 +95,7 @@ numworks-os/
 │   └── numworks_n0120.ld       Linker script (QSPI XIP @ 0x90000000)
 ├── loader/                     Internal-flash loader: sets up the QSPI
 │                               flash and starts the OS (or recovery)
+├── sim/                        Simulator: the OS in a window on a PC
 ├── include/
 │   ├── config.h                Central configuration
 │   └── stm32f730.h             Register definitions
@@ -167,6 +168,11 @@ for.
 `make test` builds and runs the host tests: the OS code against
 simulated hardware, with the address and undefined-behaviour sanitizers
 (see `tests/README.md`).
+
+`make run-sim` starts the simulator: the OS in a window on a Mac or a
+Linux PC, with the screen and a clickable keypad (needs SDL2: `brew
+install sdl2` or `apt install libsdl2-dev`). See *Simulator* in
+`docs/BUILD.md`.
 
 ## Code design
 

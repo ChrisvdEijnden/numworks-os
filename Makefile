@@ -203,7 +203,7 @@ MP_LDFLAGS := -Wl,--wrap=nlr_jump_fail
 endif
 
 .PHONY: all clean distclean flash dfu size dump mp phi delta openocd help print-libs print-newlib \
-        loader flash-loader backup-internal restore-internal test
+        loader flash-loader backup-internal restore-internal test sim run-sim
 
 # Refuse to flash the image at an address it isn't linked for: it would
 # not run there (the vector table and every absolute address would be wrong).
@@ -217,6 +217,13 @@ define check_link_addr
 endef
 
 all: $(BUILD)/$(TARGET).bin size
+
+# mp_port.c builds with or without MicroPython: after `make mp`, build
+# it again (the flags changed, which make can't see by itself). Below
+# `all`, so it isn't the default target.
+ifneq ($(MP_CORE_SRCS),)
+$(BUILD)/micropython-port/mp_port.o: $(MP_EMBED)/genhdr/qstrdefs.generated.h
+endif
 
 # -MMD -MP: also write a .d file listing the headers each object uses,
 # so changing a header (e.g. include/config.h) rebuilds what depends on it
@@ -346,6 +353,92 @@ flash-loader: $(BUILD)/loader.bin
 test:
 	@tests/run.sh $(SUITES)
 
+# ── Simulator (sim/): the OS in a window on a PC ──────────────────
+# The OS's own code, compiled for the PC, on simulated hardware: a
+# window (SDL2) for the screen and keys, a file for the flash. Only the
+# lowest layer is replaced (sim/); the display, keyboard and crash
+# screen drivers are the real ones (copies made by tests/gen_host.py).
+# Static pattern rules: GNU make 3.81 (macOS) would otherwise also
+# apply the firmware's $(BUILD)/%.o rule to these objects.
+SIM_CC     ?= cc
+SIM_BUILD  := $(BUILD)/sim
+SIM_SDL_CFLAGS = $(shell pkg-config --cflags sdl2 2>/dev/null || sdl2-config --cflags 2>/dev/null)
+SIM_SDL_LIBS   = $(shell pkg-config --libs sdl2 2>/dev/null || sdl2-config --libs 2>/dev/null)
+
+SIM_OS_SRCS := $(filter-out bootloader/% hal/% kernel/kernel.c fs/storage_qspi.c usb/usb_device.c \
+                 $(MP_CORE_SRCS) $(MP_GLUE_SRCS) micropython-port/mp_port.c,$(SRCS_C))
+SIM_SRCS    := sim/sim_main.c sim/sim_window.c sim/sim_hw.c sim/sim_display.c \
+               sim/sim_keyboard.c sim/sim_fault.c
+SIM_GEN     := $(SIM_BUILD)/gen/kernel_host.c $(SIM_BUILD)/gen/display_host.c $(SIM_BUILD)/gen/fault_host.c
+
+# The firmware's warnings; gcc's truncation and uninitialised-variable
+# guesses differ on a 64-bit PC (the truncations are on purpose)
+SIM_GCC     := $(shell $(SIM_CC) --version 2>/dev/null | grep -qi clang || echo yes)
+SIM_WARN     = -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers \
+               $(if $(SIM_GCC),-Wno-format-truncation -Wno-stringop-truncation -Wno-maybe-uninitialized)
+SIM_CFLAGS   = -std=gnu11 -O2 -g $(SIM_WARN) -DNWOS_SIM -I. -Itests/display -I$(SIM_BUILD)/gen
+SIM_MP_CFLAGS := -std=gnu99 -O2 -g -DNDEBUG -DNWOS_MICROPYTHON -Imicropython-port -I$(MP_EMBED)
+
+SIM_OBJ := $(SIM_BUILD)/obj
+SIM_OS_OBJS   := $(patsubst %.c,$(SIM_OBJ)/%.o,$(SIM_OS_SRCS) $(SIM_SRCS))
+SIM_GEN_OBJS  := $(patsubst $(SIM_BUILD)/gen/%.c,$(SIM_OBJ)/gen/%.o,$(filter-out %/fault_host.c,$(SIM_GEN)))
+SIM_MP_OBJS   := $(patsubst %.c,$(SIM_OBJ)/%.o,$(MP_CORE_SRCS))
+SIM_GLUE_OBJS := $(patsubst %.c,$(SIM_OBJ)/%.o,$(MP_GLUE_SRCS) micropython-port/mp_port.c)
+SIM_OBJS := $(SIM_OS_OBJS) $(SIM_GEN_OBJS) $(SIM_MP_OBJS) $(SIM_GLUE_OBJS)
+
+sim: $(SIM_BUILD)/numworks-sim
+
+# Start it; arguments with SIM_ARGS, e.g. make run-sim SIM_ARGS=--fresh
+run-sim: sim
+	$(SIM_BUILD)/numworks-sim $(SIM_ARGS)
+
+$(SIM_BUILD)/numworks-sim: $(SIM_OBJS)
+	@if [ -z "$(strip $(SIM_SDL_LIBS))" ]; then \
+	  echo "The simulator needs SDL2: brew install sdl2 (macOS) or apt install libsdl2-dev"; exit 1; fi
+	@echo "  LD  $@"
+	@$(SIM_CC) -o $@ $(SIM_OBJS) $(SIM_SDL_LIBS) -lpthread -lm
+	@echo "Simulator: $@ (start it with make run-sim)"
+
+# One run of the generator makes all the copies
+$(SIM_BUILD)/gen/stamp: tests/gen_host.py hal/fault.c hal/display.c kernel/kernel.c hal/backlight.c hal/led.c hal/battery.c
+	@mkdir -p $(SIM_BUILD)/gen
+	@python3 tests/gen_host.py . $(SIM_BUILD)/gen
+	@touch $@
+$(SIM_GEN): $(SIM_BUILD)/gen/stamp ;
+
+$(SIM_OS_OBJS): $(SIM_OBJ)/%.o: %.c | $(SIM_BUILD)/gen/stamp
+	@mkdir -p $(dir $@)
+	@echo "  CC  $< (sim)"
+	@$(SIM_CC) $(SIM_CFLAGS) $(SIM_EXTRA_$(notdir $*)) -MMD -MP -c $< -o $@
+
+$(SIM_GEN_OBJS): $(SIM_OBJ)/gen/%.o: $(SIM_BUILD)/gen/%.c
+	@mkdir -p $(dir $@)
+	@echo "  CC  $< (sim)"
+	@$(SIM_CC) $(SIM_CFLAGS) -include sim/sim_wfi.h -MMD -MP -c $< -o $@
+
+# MicroPython's core: quiet, as in the firmware; the embed port's
+# nlr_jump_fail() renamed (sim/sim_hw.c has the one that's used)
+$(SIM_MP_OBJS): $(SIM_OBJ)/%.o: %.c
+	@mkdir -p $(dir $@)
+	@echo "  CC  $< (sim)"
+	@$(SIM_CC) $(SIM_MP_CFLAGS) -w -Dnlr_jump_fail=embed_nlr_jump_fail -MMD -MP -c $< -o $@
+
+$(SIM_GLUE_OBJS): $(SIM_OBJ)/%.o: %.c
+	@mkdir -p $(dir $@)
+	@echo "  CC  $< (sim)"
+	@$(SIM_CC) $(if $(MP_CORE_SRCS),$(SIM_MP_CFLAGS),$(SIM_CFLAGS)) $(SIM_WARN) -MMD -MP -c $< -o $@
+
+# Per-file extras: the OS's main() runs in a thread; the window needs SDL
+SIM_EXTRA_main     = -Dmain=nwos_main
+SIM_EXTRA_sim_main = $(SIM_SDL_CFLAGS)
+SIM_EXTRA_sim_hw   = $(if $(MP_CORE_SRCS),-DNWOS_SIM_MICROPYTHON)
+
+ifneq ($(MP_CORE_SRCS),)
+$(SIM_GLUE_OBJS): $(MP_EMBED)/genhdr/qstrdefs.generated.h   # as for the firmware
+endif
+
+-include $(SIM_OBJS:.o=.d)
+
 dump: $(BUILD)/$(TARGET).elf
 	$(OBJDUMP) -d -S $< > $(BUILD)/$(TARGET).s
 
@@ -368,6 +461,8 @@ help:
 	@echo "  backup-internal - Save the internal flash first"
 	@echo "  restore-internal - Write that backup back"
 	@echo "  test     - Run the host tests (tests/)"
+	@echo "  sim      - Build the simulator (the OS in a window; needs SDL2)"
+	@echo "  run-sim  - Build and start it"
 	@echo "  mp       - Generate MicroPython (needs ./micropython checkout)"
 	@echo "  size     - Show firmware size"
 	@echo "  clean    - Clean build artefacts"

@@ -28,6 +28,6 @@ static inline void gpio_analog(GPIO_TypeDef *p, uint32_t pin) { p->MODER |= 3U <
 static inline void gpio_af(GPIO_TypeDef *p, uint32_t pin, uint32_t af, uint32_t speed) {
     (void)af; (void)speed; p->MODER = (p->MODER & ~(3U << (pin * 2))) | (2U << (pin * 2));
 }
-static struct { uint32_t AHB1ENR, AHB3ENR; } fake_rcc;
+static __attribute__((unused)) struct { uint32_t AHB1ENR, AHB3ENR; } fake_rcc;
 #define RCC (&fake_rcc)
-static uint32_t fake_bcr1, fake_btr1, fake_bwtr1;
+static __attribute__((unused)) uint32_t fake_bcr1, fake_btr1, fake_bwtr1;

@@ -73,6 +73,94 @@ either changed; this version added the `os` module, so run it once).
 The C code is compiled against newlib's own headers (`-std=gnu11`);
 `make print-libs` shows which `libc.a` the build found.
 
+## Simulator
+
+The OS can run in a window on a Mac or a Linux PC: the same code as
+on the calculator, compiled for the PC, with the screen and keypad in a
+window. It needs SDL2 and a C compiler (on a Mac: Xcode's command-line
+tools).
+
+macOS:
+
+```bash
+brew install sdl2
+make run-sim
+```
+
+Ubuntu or Debian:
+
+```bash
+sudo apt install libsdl2-dev
+make run-sim
+```
+
+`make run-sim` builds `build/sim/numworks-sim` and starts it. With
+`make mp` done first, Python is in it too.
+
+**Keys.** Click the keys in the window, or use the PC keyboard:
+
+| PC | Calculator |
+|----|------------|
+| arrows | arrows |
+| Enter | EXE |
+| Tab | OK |
+| Esc | BACK |
+| Backspace | DEL |
+| F1 or Home | HOME |
+| F2 or End | ON/OFF |
+| Ctrl | shift |
+| Alt (Option on a Mac) | alpha |
+
+Characters you type press the calculator key that carries them, so
+`7`, `+` and `(` work directly. A letter presses its alpha key (the
+small orange letter on each key), so for text, switch alpha on first,
+as on the calculator: tap Option, type `print`, tap Option again, then
+type `(1+2)`. On a Mac keyboard, F1 and F2 may need fn, and Home and
+End are fn + ← and fn + →.
+
+**Files** are kept in `~/.numworks-sim/storage.bin`. The first start
+asks to format it, like a new calculator. Options, after
+`make run-sim SIM_ARGS="..."` or on `build/sim/numworks-sim`:
+
+- `--storage FILE`: keep the files somewhere else
+- `--fresh`: start with empty storage
+- `--scale 2`: a bigger window (it can also be resized)
+- `--no-usb`: no PC transfer port
+
+**PC transfer.** The simulator opens a pseudo-terminal in place of the
+USB serial port and prints its name at start-up, e.g.
+`usb: PC transfer on /dev/ttys003`. The command-line tools work with
+it: `python3 tools/upload.py --port /dev/ttys003 list`. The browser
+uploader can't connect to it: browsers only offer real serial ports.
+
+**The terminal** shows the boot log (the debug UART). While the Shell
+app is open, commands typed in the terminal go to it, as over the UART.
+
+**Scripts**, for automated runs and screenshots. This one starts on
+empty storage in `demo.bin`, formats it, opens the calculator, works
+out 12*3+4 and saves the screen:
+
+```bash
+build/sim/numworks-sim --headless --fresh --storage demo.bin --script "wait 1500; key OK; wait 3000; key OK; type 12*3+4; key EXE; wait 300; screen calc.bmp"
+```
+
+Steps, separated by `;`: `wait MS`, `key NAME` (`OK`, `EXE`, `HOME`,
+`7`, ...: the names in `hal/keyboard.h` without `KEY_`), `hold NAME
+MS`, `type TEXT`, `uart TEXT` (a line for the shell), `shot FILE.bmp`
+(the window), `screen FILE.bmp` (the calculator screen) and `quit`.
+`--headless` runs without a window. `tests/run.sh sim` uses this.
+
+**What is simulated.** The display, keyboard and crash-screen drivers
+are the calculator's own; below them, `sim/` stands in for the
+hardware: the LCD panel (it shows exactly what the driver sends), the
+key matrix, SysTick, the QSPI flash (the storage file), and the USB core
+(the pseudo-terminal). The LED, backlight, battery (full, not
+charging), clocks and UART are simpler stand-ins. Python has the
+calculator's 48 KB heap; the stack is larger. Timing follows the PC's
+clock, not the calculator's speed. The restart in Settings, `reboot` in
+the shell, and a key on the crash screen restart the simulator; the
+files stay.
+
 ## Boot chain
 
 How the N0110 starts, from the firmware NumWorks published:

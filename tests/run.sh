@@ -23,7 +23,7 @@ SAN="-g -w -fsanitize=address,undefined"
 JOBS=$(nproc 2> /dev/null || sysctl -n hw.ncpu 2> /dev/null || echo 4)
 
 SUITES="flashfs qspi expr equations keyboard tetris functions editor scheduler
-        shell crash sleep display hal usb apps python transfer web loader"
+        shell crash sleep display hal usb apps python transfer web loader sim"
 
 # ── Helpers ────────────────────────────────────────────────────────
 skip() { echo "SKIP: $*"; return 77; }
@@ -148,6 +148,43 @@ t_loader() {
     make -s loader BUILD="$D/quick" LOADER_DEFS=-DLOADER_BUSY_TIMEOUT_MS=5 > /dev/null &&
     make -s -j"$JOBS" BUILD="$D/os" > /dev/null &&
     python3 "$T/loader/loader_emu.py" "$D/loader/loader.bin" "$D/os/numworks_os_n0120.bin" "$D/quick/loader.bin"
+}
+
+t_sim() {
+    { pkg-config --exists sdl2 2> /dev/null || sdl2-config --version > /dev/null 2>&1; } ||
+        { skip "needs SDL2 (brew install sdl2, or apt install libsdl2-dev)"; return; }
+    make -s -j"$JOBS" sim BUILD="$D/build" SIM_CC="$CC" > /dev/null || return 1
+    local out=$D/out.txt port up=no mp=no
+    [ -f micropython-port/micropython_embed/genhdr/qstrdefs.generated.h ] && mp=yes
+    rm -f "$D/storage.bin" "$D"/*.bmp
+    printf 'print("hello from the PC")\n' > "$D/hello.py"
+    # Empty storage: OK formats it. Then the Shell, and commands over the
+    # debug UART; meanwhile tools/upload.py sends hello.py over the
+    # pseudo-terminal, as to the calculator's serial port.
+    "$D/build/sim/numworks-sim" --headless --fresh --storage "$D/storage.bin" --script "wait 1500;
+        screen $D/format.bmp; key OK; wait 3500; key DOWN; key DOWN; key RIGHT; key OK; wait 800;
+        uart ls; wait 400; uart run hello.py; wait 1500; uart mem; wait 400; screen $D/shell.bmp" \
+        < /dev/null > "$out" 2>&1 &
+    local pid=$! i
+    for i in $(seq 100); do grep -q "flashfs: mounted" "$out" && break; sleep 0.1; done
+    port=$(sed -n 's/^usb: PC transfer on \([^,]*\),.*/\1/p' "$out")
+    if [ -n "$port" ] && python3 -c 'import serial' 2> /dev/null; then
+        python3 tools/upload.py --port "$port" upload "$D/hello.py" > /dev/null && up=yes
+    fi
+    wait $pid || { cat "$out"; return 1; }
+    cat "$out"
+    local fails=0
+    ck() { if eval "$1"; then echo "  ok   $2"; else echo "  FAIL $2"; fails=$((fails + 1)); fi; }
+    ck 'grep -q "lcd: id 85 85 52" "$out"' "the display driver finds the simulated panel"
+    ck 'grep -q "flashfs: mounted" "$out"' "OK formats the empty storage, the file system mounts"
+    ck 'grep -q "^  welkom.py" "$out"' "shell over the UART: ls lists the files"
+    ck 'grep -q "^Flash: " "$out"' "shell: mem"
+    if [ $up = yes ] && [ $mp = yes ]; then
+        ck 'grep -q "^hello from the PC" "$out"' "a file sent with tools/upload.py runs in Python"
+    fi
+    ck '[ "$(wc -c < "$D/format.bmp")" -eq 230454 ] && [ "$(wc -c < "$D/shell.bmp")" -eq 230454 ]' "screenshots saved"
+    ck '! cmp -s "$D/format.bmp" "$D/shell.bmp"' "the screen changed between them"
+    [ $fails = 0 ]
 }
 
 # ── Run ────────────────────────────────────────────────────────────
