@@ -416,12 +416,14 @@ $(SIM_GEN_OBJS): $(SIM_OBJ)/gen/%.o: $(SIM_BUILD)/gen/%.c
 	@echo "  CC  $< (sim)"
 	@$(SIM_CC) $(SIM_CFLAGS) -include sim/sim_wfi.h -MMD -MP -c $< -o $@
 
-# MicroPython's core: quiet, as in the firmware; the embed port's
-# nlr_jump_fail() renamed (sim/sim_hw.c has the one that's used)
+# MicroPython's core: quiet, as in the firmware. In embed_util.c the
+# embed port's nlr_jump_fail() is renamed: sim/sim_hw.c has the one
+# that's used (the firmware gets it with --wrap)
 $(SIM_MP_OBJS): $(SIM_OBJ)/%.o: %.c
 	@mkdir -p $(dir $@)
 	@echo "  CC  $< (sim)"
-	@$(SIM_CC) $(SIM_MP_CFLAGS) -w -Dnlr_jump_fail=embed_nlr_jump_fail -MMD -MP -c $< -o $@
+	@$(SIM_CC) $(SIM_MP_CFLAGS) -w $(if $(filter %/embed_util,$*),-Dnlr_jump_fail=embed_nlr_jump_fail) \
+	    -MMD -MP -c $< -o $@
 
 $(SIM_GLUE_OBJS): $(SIM_OBJ)/%.o: %.c
 	@mkdir -p $(dir $@)

@@ -11,6 +11,15 @@
 #define MICROPY_HELPER_REPL             (1)   /* REPL lines echo their value */
 #define MICROPY_STACK_CHECK             (1)
 
+/* On a Mac (the simulator and the host tests) the garbage collector
+ * saves the registers with setjmp: Apple's clang refuses the code that
+ * names them, since the frame-pointer register is reserved there.
+ * Elsewhere that code is the better choice (glibc's setjmp scrambles
+ * some of the registers it saves). */
+#if defined(__APPLE__)
+#define MICROPY_GCREGS_SETJMP           (1)
+#endif
+
 /* Single precision matches the STM32F730's FPU (fpv5-sp-d16) */
 #define MICROPY_FLOAT_IMPL              (MICROPY_FLOAT_IMPL_FLOAT)
 #define MICROPY_PY_MATH                 (1)
