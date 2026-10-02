@@ -88,7 +88,9 @@ for reg in ['BCR1', 'BTR1', 'BWTR1']:
     s = re.sub(r'(#define FMC_%s\s+)\(\*\(volatile uint32_t \*\)0xA000[0-9A-F]{4}UL\)' % reg,
                r'\1fake_' + reg.lower(), s)
 s = replace(s, 'return (GPIO_TypeDef *)(AHB1_BASE + 0x400UL * n);', 'return &fake_ports[n];', src)
-write('display_host.c', s, src, ['LCD_CMD', 'LCD_DATA', '0x60020000UL', '0xA000', 'AHB1_BASE', 'asm'])
+# the linker script's section for the framebuffer; macOS takes no ELF section names
+s = replace(s, ' __attribute__((section(".framebuf")))', '', src)
+write('display_host.c', s, src, ['LCD_CMD', 'LCD_DATA', '0x60020000UL', '0xA000', 'AHB1_BASE', 'asm', 'section('])
 
 # ── hal/backlight.c, led.c, battery.c: registers via fake_hw2.h ────────
 for name in ['backlight', 'led', 'battery']:
