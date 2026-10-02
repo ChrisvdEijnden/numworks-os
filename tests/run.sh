@@ -90,7 +90,7 @@ t_apps() {
 t_python() {
     local E=micropython-port/micropython_embed
     [ -f $E/genhdr/qstrdefs.generated.h ] || { skip "no MicroPython package: run 'make mp' first"; return; }
-    local CF="-std=gnu99 -O1 $SAN -fno-sanitize=alignment -DNWOS_MICROPYTHON -DNDEBUG -Imicropython-port -I$E"
+    local CF="-std=gnu99 -O1 $SAN -fno-sanitize=alignment -DNWOS_MICROPYTHON -DNDEBUG -DHOST_REGIONS -Imicropython-port -I$E"
     # MicroPython's own core works in ways the sanitizers flag but that are
     # intended: pointers that step outside their array, functions called
     # through a generic pointer type, and a garbage collector that reads

@@ -15,7 +15,7 @@
 #define SIM_PANEL_H 240
 
 /* The OS thread's stack and MicroPython's heap (the firmware gets them
- * from the linker script). Literal numbers: they also go into asm. */
+ * from the linker script) */
 #define SIM_STACK_SIZE 1048576
 #define SIM_MP_HEAP    49152
 

@@ -42,16 +42,13 @@
 _Static_assert(SIM_MP_HEAP == MP_HEAP_SIZE, "sim.h: SIM_MP_HEAP must match MP_HEAP_SIZE");
 
 /* ── Memory regions the linker script provides on the calculator ──
- * The OS thread runs on _sstack.._estack (sim_main.c sets that up);
- * MicroPython's heap is _smp_heap.._emp_heap. The end symbols are set
- * in assembly, where C names carry the platform's prefix. */
-#define STR_(x) #x
-#define STR(x) STR_(x)
-#define ASM_NAME(n) STR(__USER_LABEL_PREFIX__) #n
+ * The OS thread runs on _sstack (sim_main.c sets that up); MicroPython's
+ * heap is _smp_heap. Their ends are pointers (mp_port.c, built with
+ * HOST_REGIONS): macOS's linker can't put a symbol at the end of another. */
 uint8_t _sstack[SIM_STACK_SIZE] __attribute__((aligned(16384)));
-__asm__(".globl " ASM_NAME(_estack) "\n.set " ASM_NAME(_estack) ", " ASM_NAME(_sstack) " + " STR(SIM_STACK_SIZE) "\n");
 uint8_t _smp_heap[SIM_MP_HEAP] __attribute__((aligned(16)));
-__asm__(".globl " ASM_NAME(_emp_heap) "\n.set " ASM_NAME(_emp_heap) ", " ASM_NAME(_smp_heap) " + " STR(SIM_MP_HEAP) "\n");
+uint8_t *const host_estack = _sstack + SIM_STACK_SIZE;
+uint8_t *const host_emp_heap = _smp_heap + SIM_MP_HEAP;
 
 /* ── Time: SysTick ────────────────────────────────────────────────
  * Ticks are delivered in the OS thread, never from another thread, so

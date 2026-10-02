@@ -99,9 +99,18 @@ void mp_pause_after_graphics(void) {
 #include "port/micropython_embed.h"
 #include "shared/readline/readline.h"
 
-/* Heap and stack regions from the linker script */
+/* Heap and stack regions from the linker script. Builds for a PC (the
+ * simulator, the tests) define HOST_REGIONS and give the ends as
+ * pointers: macOS's linker can't put a symbol at the end of another. */
+#ifdef HOST_REGIONS
+extern uint8_t _smp_heap[], _sstack[];
+extern uint8_t *const host_emp_heap, *const host_estack;
+#define _emp_heap host_emp_heap
+#define _estack   host_estack
+#else
 extern uint8_t _smp_heap[], _emp_heap[];
 extern uint8_t _sstack[], _estack[];
+#endif
 
 #define STACK_MARGIN 2048   /* headroom for C code below the Python VM */
 

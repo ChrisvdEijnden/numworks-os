@@ -7,16 +7,14 @@
 #include "mp_port.h"
 #include "../../hal/keyboard.h"
 #include "../../kernel/kernel.h"
-/* linker-provided regions, faked: 48 KB heap like the firmware. The
- * end symbols are set in assembly, where C names carry the platform's
- * prefix ("_" on macOS, none on Linux). */
-#define STR_(x) #x
-#define STR(x) STR_(x)
-#define ASM_NAME(n) STR(__USER_LABEL_PREFIX__) #n
+/* The regions the linker script provides on the calculator: a 48 KB
+ * heap like the firmware's, and a stack region (MicroPython runs on the
+ * host's own stack, see python_start()). mp_port.c is built with
+ * HOST_REGIONS and takes their ends as pointers. */
 uint8_t _smp_heap[48 * 1024] __attribute__((aligned(16)));
-__asm__(".globl " ASM_NAME(_emp_heap) "\n.set " ASM_NAME(_emp_heap) ", " ASM_NAME(_smp_heap) " + 49152\n");
-uint8_t _sstack[16];
-__asm__(".globl " ASM_NAME(_estack) "\n.set " ASM_NAME(_estack) ", " ASM_NAME(_sstack) " + 16384\n");
+uint8_t _sstack[16384];
+uint8_t *const host_emp_heap = _smp_heap + sizeof _smp_heap;
+uint8_t *const host_estack = _sstack + sizeof _sstack;
 /* app API */
 void python_app_init(void); void python_app_handle_event(const kernel_event_t *ev); void python_app_redraw(void);
 void pa_type(const char *t); const char *pa_line(void); bool pa_cont(void); void pa_output(char *buf, int max); void pa_clear(void);

@@ -428,7 +428,8 @@ $(SIM_MP_OBJS): $(SIM_OBJ)/%.o: %.c
 $(SIM_GLUE_OBJS): $(SIM_OBJ)/%.o: %.c
 	@mkdir -p $(dir $@)
 	@echo "  CC  $< (sim)"
-	@$(SIM_CC) $(if $(MP_CORE_SRCS),$(SIM_MP_CFLAGS),$(SIM_CFLAGS)) $(SIM_WARN) -MMD -MP -c $< -o $@
+	@$(SIM_CC) $(if $(MP_CORE_SRCS),$(SIM_MP_CFLAGS),$(SIM_CFLAGS)) $(SIM_WARN) -DHOST_REGIONS \
+	    -MMD -MP -c $< -o $@
 
 # Per-file extras: the OS's main() runs in a thread; the window needs SDL
 SIM_EXTRA_main     = -Dmain=nwos_main
