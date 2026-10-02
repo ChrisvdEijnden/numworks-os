@@ -7,11 +7,16 @@
 #include "mp_port.h"
 #include "../../hal/keyboard.h"
 #include "../../kernel/kernel.h"
-/* linker-provided regions, faked: 48 KB heap like the firmware */
+/* linker-provided regions, faked: 48 KB heap like the firmware. The
+ * end symbols are set in assembly, where C names carry the platform's
+ * prefix ("_" on macOS, none on Linux). */
+#define STR_(x) #x
+#define STR(x) STR_(x)
+#define ASM_NAME(n) STR(__USER_LABEL_PREFIX__) #n
 uint8_t _smp_heap[48 * 1024] __attribute__((aligned(16)));
-__asm__(".globl _emp_heap\n.set _emp_heap, _smp_heap + 49152\n");
+__asm__(".globl " ASM_NAME(_emp_heap) "\n.set " ASM_NAME(_emp_heap) ", " ASM_NAME(_smp_heap) " + 49152\n");
 uint8_t _sstack[16];
-__asm__(".globl _estack\n.set _estack, _sstack + 16384\n");
+__asm__(".globl " ASM_NAME(_estack) "\n.set " ASM_NAME(_estack) ", " ASM_NAME(_sstack) " + 16384\n");
 /* app API */
 void python_app_init(void); void python_app_handle_event(const kernel_event_t *ev); void python_app_redraw(void);
 void pa_type(const char *t); const char *pa_line(void); bool pa_cont(void); void pa_output(char *buf, int max); void pa_clear(void);
@@ -79,13 +84,20 @@ static void repl(const char *code) { pa_clear(); line(code); }
 /* an entry that draws: the drawing stays up until a key is pressed */
 static void draw_repl(const char *code) { key_code_t k[] = { KEY_OK }; keys(k, 1); repl(code); }
 
+/* MicroPython on the host's own stack, not the firmware's */
+static int *stack_top;
+static void python_start(void) {
+    mp_init_port();
+    mp_stack_set_top(stack_top);
+    mp_stack_set_limit(256 * 1024);
+}
+
 int main(void) {
     int marker;
+    stack_top = &marker;
     setvbuf(stdout, NULL, _IONBF, 0);
     make_files();
-    mp_init_port();
-    mp_stack_set_top(&marker);
-    mp_stack_set_limit(256 * 1024);
+    python_start();
     python_app_init();
 
     puts("multi-line REPL:");
@@ -233,8 +245,14 @@ int main(void) {
     check(file_is("half.txt", "deel 1, deel 2"), "leaving the app closes and saves open files");
     repl("f = open('mid.txt', 'w'); f.write('y' * 12000); f.close(); print(len(open('mid.txt').read()))");
     check(strstr(output(), "12000") != NULL, "a 12 000-byte file written from Python (over the old 8 KB)");
-    repl("big = open('big.txt', 'w'); big.write('x' * 17000)");
-    check(strstr(output(), "OSError") != NULL, "writing more than 16 KB from Python: OSError");
+    /* The limit, on a fresh heap: after everything above, the 48 KB heap is
+     * too fragmented for a write buffer that grows to 16 KB */
+    mp_deinit_port();
+    python_start();
+    repl("big = open('big.txt', 'w'); [big.write('x' * 1024) for i in range(17)]");
+    check(strstr(output(), "OSError: 28") != NULL, "writing more than 16 KB from Python: OSError (ENOSPC)");
+    repl("big.close(); print(len(open('big.txt').read()))");
+    check(strstr(output(), "\n16384\n") != NULL, "... and the first 16 KB were kept and saved");
     repl("import os; d = os.listdir(); print(len(d), 'uit.txt' in d, 'mymod.py' in d)");
     check(strstr(output(), "True True") != NULL, "os.listdir()");
     repl("print(os.stat('uit.txt')[6])");

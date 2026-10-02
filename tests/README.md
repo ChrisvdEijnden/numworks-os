@@ -27,6 +27,14 @@ failed. Suites whose tools are missing are skipped and say why.
   (`npm install -g playwright && npx playwright install chromium`)
 - `loader`: the arm-none-eabi toolchain and `pip install unicorn`
 
+The suites build with gcc or clang (`make test HOSTCC=clang` picks
+clang); both are checked on Linux.
+
+**macOS**: Xcode's command-line tools (`xcode-select --install`) give
+`gcc`, which is clang with the sanitizers. The script runs on the
+bash 3.2 that macOS ships. It hasn't been run on a Mac yet; if a suite
+fails there, its log in `tests/build/logs/` says why.
+
 ## The suites
 
 | Suite | Code under test | What it checks |

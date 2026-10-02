@@ -20,7 +20,7 @@ mkdir -p "$B/logs"
 export ASAN_OPTIONS=${ASAN_OPTIONS:-detect_stack_use_after_return=0}
 CC=${HOSTCC:-gcc}
 SAN="-g -w -fsanitize=address,undefined"
-JOBS=$(nproc 2>/dev/null || echo 4)
+JOBS=$(nproc 2> /dev/null || sysctl -n hw.ncpu 2> /dev/null || echo 4)
 
 SUITES="flashfs qspi expr equations keyboard tetris functions editor scheduler
         shell crash sleep display hal usb apps python transfer web loader"
@@ -91,17 +91,32 @@ t_python() {
     local E=micropython-port/micropython_embed
     [ -f $E/genhdr/qstrdefs.generated.h ] || { skip "no MicroPython package: run 'make mp' first"; return; }
     local CF="-std=gnu99 -O1 $SAN -fno-sanitize=alignment -DNWOS_MICROPYTHON -DNDEBUG -Imicropython-port -I$E"
-    local f o objs=()
+    # MicroPython's own core works in ways the sanitizers flag but that are
+    # intended: pointers that step outside their array, functions called
+    # through a generic pointer type, and a garbage collector that reads
+    # the whole C stack, the sanitizer's guard zones included. Those checks
+    # are off for the core only; our port code keeps all of them.
+    local CORE="$CF -fno-sanitize=pointer-overflow"
+    $CC --version 2> /dev/null | grep -q clang && CORE="$CORE -fno-sanitize=function"
+    local f o fl objs=() n=0
+    # compiled once, again when a source or the compiler changes
+    [ "$(cat "$D/o/flags" 2> /dev/null)" = "$CC $CORE" ] || rm -rf "$D/o"
     mkdir -p "$D/o"
-    # MicroPython itself: compiled once, again only when a source changes
+    echo "$CC $CORE" > "$D/o/flags"
     for f in $E/py/*.c $E/shared/runtime/gchelper_generic.c $E/port/embed_util.c \
              micropython-port/modules/nwos/*.c micropython-port/mp_port.c; do
         o=$D/o/$(echo "$f" | tr / _).o
         objs+=("$o")
         [ "$o" -nt "$f" ] && continue
+        case $f in
+            $E/py/gc.c) fl="$CORE -fno-sanitize=address" ;;
+            $E/*)       fl=$CORE ;;
+            *)          fl=$CF ;;
+        esac
         rm -f "$o"
-        $CC $CF -c "$f" -o "$o" &
-        while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n; done
+        $CC $fl -c "$f" -o "$o" &
+        n=$((n + 1))
+        if [ $((n % JOBS)) = 0 ]; then wait; fi    # (macOS's bash 3.2 has no wait -n)
     done
     wait
     for o in "${objs[@]}"; do [ -f "$o" ] || return 1; done     # a compile failed
@@ -155,7 +170,7 @@ for s in $want; do
         echo "skipped: $(sed -n 's/^SKIP: //p' "$log" | tail -1)"
         skipped=$((skipped + 1))
     elif [ $rc = 0 ]; then
-        n=$(grep -cE '^ *ok\b' "$log")       # suites that list their checks
+        n=$(grep -cE '^ *ok( |$)' "$log")       # suites that list their checks
         echo "ok   ($([ "$n" = 0 ] || echo "$n checks, ")$((SECONDS - start)) s)"
         pass=$((pass + 1))
     else
