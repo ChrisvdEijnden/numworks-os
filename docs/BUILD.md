@@ -2,8 +2,9 @@
 
 > This firmware targets the **STM32F730** (NumWorks N0110 family). It does
 > **not** run on the N0120, which has an STM32H7. Nothing has been tested
-> on real hardware yet, and it can't start on its own yet: see
-> *Boot chain* below.
+> on real hardware yet. It starts through its own small loader, which
+> replaces NumWorks' code in the internal flash: read *Boot chain* and
+> *Installing* below first.
 
 ## Prerequisites
 
@@ -66,16 +67,90 @@ How the N0110 starts, from the firmware NumWorks published:
   a "userland" on top of that kernel; this OS is a whole kernel, so it
   can't run that way.
 
-Either way, writing this image to `0x90000000` alone gives a calculator
-that doesn't start: the code in the internal flash jumps somewhere into
-our image, not to our reset handler. What's missing is a small loader in
-the internal flash that sets up the QSPI flash in memory-mapped mode
-(pins PB2, PB6, PC9, PD12, PD13, PE2; see `include/config.h`) and jumps
-to the vector table at `0x90000000`. That loader isn't written yet.
-Replacing the internal flash also removes NumWorks' own code, so before
-doing that, check how your calculator's recovery mode works. Recovering
-from a bad internal flash may need the STM32's built-in bootloader or an
-SWD probe.
+Either way, NumWorks' code in the internal flash doesn't start this OS:
+it jumps somewhere into our image, not to our reset handler. So the OS
+comes with its own loader for the internal flash (`loader/`, about
+1.4 KB, `make loader`). At reset it:
+
+1. reads key 6 (ten times, 100 µs apart): held, it starts ST's
+   bootloader (below);
+2. sets up the QSPI flash the way Epsilon does: pins PB2, PB6, PC9,
+   PD12, PD13, PE2; clock HCLK/2; 8 MB; chip select high for at least
+   50 ns; clock mode 3. A reset of the STM32 doesn't reset the flash, so
+   the loader first takes it out of continuous-read mode and deep
+   power-down and waits while it is busy (an erase cut short by the
+   reset). It checks the JEDEC ID, sets the quad-enable bit if needed,
+   and maps the flash at `0x90000000` with Fast Read Quad I/O (EBh,
+   continuous read), or with one-line Fast Read (0Bh) if the bit can't
+   be set;
+3. checks the vector table at `0x90000000`: the stack pointer in RAM,
+   the reset handler a Thumb address in the code area (below the file
+   system);
+4. sets VTOR and the stack pointer and jumps to the reset handler.
+
+If anything fails (no answer from the flash, no valid image) it starts
+ST's bootloader with the red LED on, rather than crashing. The loader
+runs at the 16 MHz the chip resets with and uses only its stack; the
+OS sets up the clocks itself. The QSPI settings it leaves
+(`loader/loader_qspi.h`) are what the OS's storage driver expects.
+`tests/loader` runs the loader in an emulated Cortex-M7 with models of
+the QSPI controller and the AT25SF641, and `tests/qspi` runs the
+storage driver on the settings the loader leaves.
+
+**ST's bootloader** is in the STM32's ROM and can't be overwritten. It
+shows up over USB as "STM32 BOOTLOADER" (DFU, `0483:df11`) and can read
+and write the internal flash, not the QSPI flash. Hold 6, press RESET,
+release 6 to get there: NumWorks' own flashing scripts for the N0110
+(Epsilon 15) use that. The loader also checks key 6 itself, in case.
+When the loader starts ST's bootloader, the screen stays dark and the
+LED is red.
+
+## Installing
+
+Not tried on a real calculator yet. It needs a calculator running
+Epsilon 15 or older: whether NumWorks' bootloader in Epsilon 16 and
+later protects the internal flash from being written is unknown.
+
+1. **Save the internal flash.** Hold 6, press RESET, release 6, then:
+
+   ```bash
+   make backup-internal          # writes backup-internal.bin
+   ```
+
+   Keep `backup-internal.bin` (git ignores it). It is NumWorks' code:
+   it isn't ours to share.
+2. **Write the OS to the QSPI flash** with Epsilon's own DFU: press
+   RESET, let Epsilon start and connect the calculator over USB; it then
+   shows up as `0483:a291`.
+
+   ```bash
+   make flash CONFIRM=overwrite-stock-firmware
+   ```
+
+   The calculator doesn't start after this: Epsilon is gone, and its
+   start-up code in the internal flash doesn't know our image.
+3. **Write the loader**: hold 6, press RESET, release 6, then
+
+   ```bash
+   make flash-loader CONFIRM=replace-internal-flash
+   ```
+
+   When it is done, the calculator restarts into the OS.
+
+**Updating the OS later.** ST's bootloader can't write the QSPI flash,
+and Epsilon's DFU is gone. Ways in, until this OS has a USB update mode
+of its own:
+
+- NumWorks' RAM flasher: build `flasher.light` from Epsilon 15's source
+  and load it into RAM through ST's bootloader, the way that version's
+  `build/targets.device.n0110.mak` does. It then shows up as
+  `0483:a291`, and `make flash` works. It is NumWorks' code: build it
+  yourself, don't pass it around.
+- An SWD probe (ST-Link) with OpenOCD's `stmqspi` flash driver.
+
+**Going back to NumWorks' firmware**: hold 6, press RESET, release 6,
+run `make restore-internal` (writes `backup-internal.bin` back), then
+use NumWorks' recovery (*Restore Official Firmware* below).
 
 ## Flashing and recovery
 
@@ -86,9 +161,9 @@ SWD probe.
 - The last 256 KB of the QSPI flash (from `0x907C0000`) hold the
   file system; the linker refuses images that would overlap it. On the
   first start the calculator asks before formatting it.
-- `make flash` writes it there in rescue mode, **over the stock
-  firmware**; on its own that doesn't boot (see *Boot chain*). It asks
-  you to confirm:
+- `make flash` writes it there through NumWorks' DFU, **over the stock
+  firmware**; it boots only with the loader in the internal flash (see
+  *Installing*). It asks you to confirm:
 
   ```bash
   make flash CONFIRM=overwrite-stock-firmware
@@ -116,7 +191,8 @@ where NumWorks' bootloader lives; Epsilon itself lives in the external
 flash.
 
 Use NumWorks' own recovery instead, which reinstalls a complete, signed
-firmware:
+firmware. If this OS's loader is in the internal flash, put NumWorks'
+code back first (`make restore-internal`, see *Installing*).
 
 1. Put the calculator in rescue mode (hold 6, press RESET). The screen
    shows `numworks.com/rescue`.

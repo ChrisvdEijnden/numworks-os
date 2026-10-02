@@ -1,5 +1,6 @@
 # Build output
 /build/
+/tests/build/
 
 # MicroPython checkout and the package generated from it by `make mp`
 /micropython/
@@ -15,3 +16,4 @@ __pycache__/
 
 # Firmware dumps: NumWorks' firmware isn't ours to distribute
 /epsilon-*.bin
+/backup-internal.bin

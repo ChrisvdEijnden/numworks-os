@@ -12,10 +12,10 @@ three games, in Dutch or English.
 > - The board pins (keyboard, LCD, backlight, LED, battery, USB, debug
 >   UART) follow the N0110 configuration NumWorks published with
 >   Epsilon 15.5.
-> - Nothing here has been tested on a real calculator, and it doesn't
->   boot by itself yet: NumWorks' code in the internal flash doesn't
->   jump to it (see *Boot chain* in `docs/BUILD.md`). Read
->   *Flashing and recovery* there before flashing anything.
+> - Nothing here has been tested on a real calculator. It starts
+>   through its own small loader, which replaces NumWorks' code in the
+>   internal flash. Read *Boot chain* and *Installing* in
+>   `docs/BUILD.md` before flashing anything.
 
 ## Features
 
@@ -93,6 +93,8 @@ numworks-os/
 ├── main.c                      Boot sequence
 ├── linker/
 │   └── numworks_n0120.ld       Linker script (QSPI XIP @ 0x90000000)
+├── loader/                     Internal-flash loader: sets up the QSPI
+│                               flash and starts the OS (or recovery)
 ├── include/
 │   ├── config.h                Central configuration
 │   └── stm32f730.h             Register definitions
@@ -132,6 +134,7 @@ numworks-os/
 │   ├── web/uploader.html       PC file transfer from Chrome or Edge
 │   ├── upload.py               PC file transfer, command line
 │   └── transfer.py             Same, alternative command line
+├── tests/                      Host tests (`make test`), see tests/README.md
 └── docs/
     ├── BUILD.md                Building, flashing, recovery
     └── ARCHITECTURE.md         How the system works
@@ -150,9 +153,15 @@ make mp && make         # firmware with Python
 ```
 
 The image is linked to run from the external QSPI flash at
-`0x90000000`. `make phi`, `make delta` and `make openocd` refuse to
-flash it to an address it isn't linked for, and `make flash` asks for
-confirmation because it overwrites the stock firmware.
+`0x90000000`, started by the loader (`make loader`) in the internal
+flash. `make flash` and `make flash-loader` ask for confirmation
+because they replace NumWorks' firmware; `make phi`, `make delta` and
+`make openocd` refuse to flash the image to an address it isn't linked
+for.
+
+`make test` builds and runs the host tests: the OS code against
+simulated hardware, with the address and undefined-behaviour sanitizers
+(see `tests/README.md`).
 
 ## Code design
 

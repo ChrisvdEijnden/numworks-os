@@ -197,7 +197,8 @@ $(patsubst %.c,$(BUILD)/%.o,$(MP_GLUE_SRCS) micropython-port/mp_port.c): \
 MP_LDFLAGS := -Wl,--wrap=nlr_jump_fail
 endif
 
-.PHONY: all clean distclean flash dfu size dump mp phi delta openocd help print-libs print-newlib
+.PHONY: all clean distclean flash dfu size dump mp phi delta openocd help print-libs print-newlib \
+        loader flash-loader backup-internal restore-internal test
 
 # Refuse to flash the image at an address it isn't linked for: it would
 # not run there (the vector table and every absolute address would be wrong).
@@ -280,16 +281,65 @@ flash: $(BUILD)/$(TARGET).bin
 	  echo "This overwrites the stock NumWorks firmware at 0x90000000. Only"; \
 	  echo "NumWorks' own recovery can bring it back (see docs/BUILD.md,"; \
 	  echo "'Restore Official Firmware')."; \
-	  echo "It will NOT boot with NumWorks' code in the internal flash: that"; \
-	  echo "code doesn't jump to this image (docs/BUILD.md, 'Boot chain')."; \
+	  echo "It boots only once this OS's loader is in the internal flash"; \
+	  echo "(make flash-loader; docs/BUILD.md, 'Installing')."; \
 	  echo "To go ahead anyway: make flash CONFIRM=overwrite-stock-firmware"; \
 	  exit 1; \
 	fi
 	@echo "Flashing to the N0110's QSPI flash via rescue mode..."
-	@echo "Calculator must show numworks.com/rescue screen."
+	@echo "Needs NumWorks' DFU (0483:a291): Epsilon's own, or NumWorks' RAM flasher."
 	dfu-util -d 0483:a291 -a 0 -s 0x90000000:leave -D $(BUILD)/$(TARGET).bin
 
 dfu:   phi
+
+# ── Internal-flash loader (loader/) ───────────────────────────────
+# Starts the OS from the QSPI flash; see "Boot chain" in docs/BUILD.md.
+LOADER_CFLAGS := -mcpu=$(CPU) -mthumb -mfloat-abi=soft -Os -std=gnu11 \
+    -ffreestanding -fno-tree-loop-distribute-patterns -ffunction-sections \
+    -Wall -Wextra -Werror
+LOADER_DFU ?= 0483:df11
+# Extra defines, e.g. -DLOADER_BUSY_TIMEOUT_MS=5 (tests/run.sh loader)
+LOADER_DEFS ?=
+
+loader: $(BUILD)/loader.bin
+
+$(BUILD)/loader.elf: loader/loader.c loader/loader_qspi.h loader/loader.ld
+	@mkdir -p $(BUILD)
+	$(CC) $(LOADER_CFLAGS) $(LOADER_DEFS) -nostdlib -T loader/loader.ld -Wl,--gc-sections \
+	    -Wl,-Map=$(BUILD)/loader.map -o $@ loader/loader.c
+
+$(BUILD)/loader.bin: $(BUILD)/loader.elf
+	$(OBJCOPY) -O binary $< $@
+	@echo "loader: $$(wc -c < $@) bytes (internal flash, 0x08000000)"
+
+# Save what is in the internal flash now (NumWorks' code) before
+# replacing it. Keep the file to yourself: it isn't ours to share.
+backup-internal:
+	@echo "Calculator in ST's bootloader: hold 6, press RESET, release 6."
+	dfu-util -d $(LOADER_DFU) -a 0 -s 0x08000000:65536 -U backup-internal.bin
+	@echo "Saved backup-internal.bin"
+
+# Put the saved contents back (then NumWorks' recovery works again)
+restore-internal:
+	@test -f backup-internal.bin || { echo "No backup-internal.bin here"; exit 1; }
+	@echo "Calculator in ST's bootloader: hold 6, press RESET, release 6."
+	dfu-util -d $(LOADER_DFU) -a 0 -s 0x08000000:leave -D backup-internal.bin
+
+flash-loader: $(BUILD)/loader.bin
+	@if [ "$(CONFIRM)" != "replace-internal-flash" ]; then \
+	  echo "This replaces the code in the calculator's internal flash"; \
+	  echo "(NumWorks' start-up code) with this OS's loader. Read"; \
+	  echo "'Boot chain' and 'Installing' in docs/BUILD.md first,"; \
+	  echo "and save the old contents with: make backup-internal"; \
+	  echo "To go ahead: make flash-loader CONFIRM=replace-internal-flash"; \
+	  exit 1; \
+	fi
+	@echo "Calculator in ST's bootloader: hold 6, press RESET, release 6."
+	dfu-util -d $(LOADER_DFU) -a 0 -s 0x08000000:leave -D $(BUILD)/loader.bin
+
+# Host tests (tests/run.sh); one suite: make test SUITES=qspi
+test:
+	@tests/run.sh $(SUITES)
 
 dump: $(BUILD)/$(TARGET).elf
 	$(OBJDUMP) -d -S $< > $(BUILD)/$(TARGET).s
@@ -308,6 +358,11 @@ help:
 	@echo "  delta    - Flash via Delta bootloader"
 	@echo "  openocd  - Flash via ST-Link (dev)"
 	@echo "  flash    - Overwrite stock firmware in QSPI (needs CONFIRM=...)"
+	@echo "  loader   - Build the internal-flash loader"
+	@echo "  flash-loader - Write the loader to internal flash (needs CONFIRM=...)"
+	@echo "  backup-internal - Save the internal flash first"
+	@echo "  restore-internal - Write that backup back"
+	@echo "  test     - Run the host tests (tests/)"
 	@echo "  mp       - Generate MicroPython (needs ./micropython checkout)"
 	@echo "  size     - Show firmware size"
 	@echo "  clean    - Clean build artefacts"

@@ -5,7 +5,7 @@
 | Item | Detail |
 |------|--------|
 | MCU | STM32F730V8T6 — Cortex-M7, run at 192 MHz, single-precision FPU |
-| Flash | 64 KB internal (bootloader) + 8 MB external QSPI (AT25SF641): code and files |
+| Flash | 64 KB internal (our loader) + 8 MB external QSPI (AT25SF641): code and files |
 | RAM | 256 KB in total: 64 KB DTCM @ 0x2000_0000, 176 KB SRAM1, 16 KB SRAM2 |
 | Display | 320×240, ST7789V controller on a 16-bit 8080 bus through FMC bank 1 (0x6000_0000) |
 | Input | 9×6 key matrix, NumWorks' 46-key layout |
@@ -35,7 +35,7 @@ They are collected in `include/config.h`.
 | Battery voltage ÷ 2 (ADC1 ch 9) | PB1 |
 | Charger CHG (low = charging) | PE3 |
 | USB D− / D+ / VBUS | PA11 / PA12 / PA9 |
-| QSPI flash (set up by the bootloader) | PB2, PB6, PC9, PD12, PD13, PE2 |
+| QSPI flash (set up by the loader) | PB2, PB6, PC9, PD12, PD13, PE2 |
 | Debug console (USART6, AF8) | PC6 TX, PC7 RX |
 
 Earlier versions of this OS guessed some of these, and the guesses were
@@ -63,8 +63,8 @@ SRAM  0x2001_0000 150 KB  framebuffer (320×240×2)
       then  ... 0x2004_0000  newlib heap (~13 KB)
 ```
 
-Internal flash (64 KB on the F730x8) holds NumWorks' bootloader and is
-left alone.
+Internal flash (64 KB on the F730x8) holds only our loader, at
+0x0800_0000 in the first 16 KB sector (`loader/`, see *Boot*).
 
 `linker/numworks_n0120.ld` is the linker script; it asserts the stack
 and heap minimums at link time. The stack is filled with a pattern at
@@ -72,7 +72,16 @@ boot, so `mem` can show how deep it has been.
 
 ## Boot
 
-`Reset_Handler` masks interrupts, sets the stack pointer, points VTOR at
+The loader in the internal flash (`loader/loader.c`) runs first. It
+checks key 6 (held: ST's ROM bootloader, for recovery), brings the QSPI
+flash to a known state (out of continuous-read mode and deep power-down,
+not busy), maps it at 0x9000_0000 with quad reads, checks the vector
+table there and jumps to it with VTOR set. It falls back to ST's
+bootloader, red LED on, if the flash doesn't answer or there is no valid
+image. Details and the reasons behind its settings are in
+`docs/BUILD.md` (*Boot chain*) and the comments in the source.
+
+The OS's `Reset_Handler` masks interrupts, sets the stack pointer, points VTOR at
 our vector table, disables interrupts a bootloader left enabled, copies
 `.data`, clears `.bss`, enables the FPU and unmasks interrupts. Then
 `boot_main()`:
@@ -101,7 +110,7 @@ if HOME is held).
 If the file system isn't there (first boot, or the area was damaged),
 the calculator asks before formatting: **OK** formats, **BACK** carries
 on without files. If the flash itself isn't usable (unexpected JEDEC
-ID, write protection, QSPI not set up by the bootloader), the reason is
+ID, write protection, QSPI not set up by the loader), the reason is
 shown and logged and the system runs without files.
 
 The debug UART (USART6 on PC6/PC7, 115200 8N1) logs the reset cause (power-on,
@@ -227,7 +236,7 @@ to it needs care (`fs/storage_qspi.c`):
   the QSPI window while it is in command mode;
 - the MPU blocks the window meanwhile, so a stray access faults
   instead of reading garbage;
-- the bootloader's QSPI settings (SPI or quad-instruction mode,
+- the QSPI settings the loader left (SPI or quad-instruction mode,
   continuous-read mode) are read back and restored afterwards;
 - programs are split at 256-byte pages, erases use 64 KB blocks when
   aligned (else 4 KB sectors), and every write and erase is read back
