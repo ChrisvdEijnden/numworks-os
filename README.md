@@ -142,14 +142,19 @@ numworks-os/
 
 ## Building
 
-See `docs/BUILD.md` for details. In short:
+See `docs/BUILD.md` for details (and for macOS). In short, on
+Ubuntu or Debian, the firmware without Python:
 
 ```bash
 sudo apt install gcc-arm-none-eabi libnewlib-arm-none-eabi
-make                    # firmware without Python
+make
+```
 
+With Python:
+
+```bash
 git clone https://github.com/micropython/micropython
-make mp && make         # firmware with Python
+make mp && make
 ```
 
 The image is linked to run from the external QSPI flash at

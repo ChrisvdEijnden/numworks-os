@@ -8,27 +8,45 @@
 
 ## Prerequisites
 
+Ubuntu or Debian:
+
 ```bash
-# Ubuntu/Debian
-sudo apt install gcc-arm-none-eabi libnewlib-arm-none-eabi binutils-arm-none-eabi \
-                 dfu-util openocd python3
-
-# macOS: the compiler, plus newlib (C library and headers)
-brew install --cask gcc-arm-embedded
-brew install dfu-util openocd
-
-# PC file transfer tools
+sudo apt install gcc-arm-none-eabi libnewlib-arm-none-eabi binutils-arm-none-eabi dfu-util openocd python3
 pip install pyserial
 ```
 
-If the build can't find `libc.a`, run `make print-libs`.
+macOS (the cask is Arm's toolchain, which includes the C library,
+newlib):
+
+```bash
+brew install --cask gcc-arm-embedded
+brew install dfu-util openocd
+pip install pyserial
+```
+
+If Homebrew's `arm-none-eabi-gcc` formula is installed too, its
+compiler comes first and Arm's isn't linked ("skipping link"). Put
+Arm's first in your PATH (adjust the version to the one installed):
+
+```bash
+echo 'export PATH="/Applications/ArmGNUToolchain/14.2.rel1/arm-none-eabi/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+arm-none-eabi-gcc --version
+```
+
+The last line should mention "Arm GNU Toolchain". If the build can't
+find `libc.a`, run `make print-libs`.
+
+The command blocks in these docs have no comments in them, so they can
+be pasted into zsh, which by default doesn't treat `#` as a comment.
 
 ## Build
 
 ```bash
 make -j4
-# Output: build/numworks_os_n0120.bin (and .elf, .map)
 ```
+
+The output is `build/numworks_os_n0120.bin` (and `.elf`, `.map`).
 
 Without MicroPython the Python app and `run` say Python isn't available;
 everything else works.
@@ -38,11 +56,12 @@ everything else works.
 MicroPython is built from its *embed* port: `make mp` generates
 `micropython-port/micropython_embed/` (MicroPython's core plus headers
 generated for `micropython-port/mpconfigport.h` and our `display`
-module). The next `make` compiles it in.
+module). The next `make` compiles it in. With a MicroPython checkout
+elsewhere, use `make mp MICROPYTHON=/path/to/micropython`.
 
 ```bash
 git clone https://github.com/micropython/micropython
-make mp            # or: make mp MICROPYTHON=/path/to/micropython
+make mp
 make -j4
 ```
 
@@ -111,10 +130,11 @@ Not tried on a real calculator yet. It needs a calculator running
 Epsilon 15 or older: whether NumWorks' bootloader in Epsilon 16 and
 later protects the internal flash from being written is unknown.
 
-1. **Save the internal flash.** Hold 6, press RESET, release 6, then:
+1. **Save the internal flash.** Hold 6, press RESET, release 6, then
+   save it to `backup-internal.bin`:
 
    ```bash
-   make backup-internal          # writes backup-internal.bin
+   make backup-internal
    ```
 
    Keep `backup-internal.bin` (git ignores it). It is NumWorks' code:

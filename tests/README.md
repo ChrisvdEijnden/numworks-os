@@ -5,10 +5,13 @@ the QSPI and USB controllers, the LCD bus, the key matrix. Everything
 is built with gcc's address and undefined-behaviour sanitizers, so a
 stray pointer fails the test even when the result happens to look right.
 
+All suites (`tests/run.sh` does the same), two of them, and the list of
+suites:
+
 ```bash
-make test                  # all suites (or: tests/run.sh)
+make test
 make test SUITES="qspi usb"
-tests/run.sh -l            # list the suites
+tests/run.sh -l
 ```
 
 Each suite prints one line; the full output is in

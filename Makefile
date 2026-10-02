@@ -153,6 +153,11 @@ LDFLAGS := $(MCU) \
     -nostartfiles \
     -nodefaultlibs \
     $(_LIBC_A) $(_LIBM_A) $(_LIBGCC)
+# The QSPI flash routines run from RAM (in .data), so that segment is
+# writable and executable on purpose. Linkers from binutils 2.39 on warn
+# about it; tell them it's intended, if they know the option.
+LDFLAGS += $(shell $(CC) -Wl,--no-warn-rwx-segments -Wl,--version > /dev/null 2>&1 \
+                   && echo -Wl,--no-warn-rwx-segments)
 
 # The C library's headers (newlib). Where the compiler doesn't find them
 # by itself (Homebrew arm-none-eabi-gcc ships without newlib), use the

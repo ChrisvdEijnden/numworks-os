@@ -26,6 +26,10 @@
 /* BACK (or HOME) interrupts a running script with KeyboardInterrupt:
  * every MICROPY_VM_HOOK_COUNT jumps/returns the VM calls nwos_mp_poll(). */
 #define MICROPY_KBD_EXCEPTION           (1)
+/* micropython.kbd_intr() calls this (defined in mp_port.c). MicroPython
+ * declares it in shared/runtime/interrupt_char.h, which the embed port
+ * doesn't include; GCC 14 refuses the call without a declaration. */
+void mp_hal_set_interrupt_char(int c);
 #define MICROPY_VM_HOOK_COUNT           (64)
 #define MICROPY_VM_HOOK_INIT            static unsigned int vm_hook_divisor = MICROPY_VM_HOOK_COUNT;
 #define MICROPY_VM_HOOK_POLL            if (--vm_hook_divisor == 0) { \
