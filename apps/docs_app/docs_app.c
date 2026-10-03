@@ -71,7 +71,8 @@ static const page_t NL[] = {
         "open(n).read(), open(n,'w')",
         "os.listdir() remove() stat()",
         "BACK: script stoppen",
-        "Lege regel + EXE: blok", NULL } },
+        "Lege regel + EXE: blok",
+        "SHIFT 0: #   SHIFT .: %", NULL } },
     { "Shell", {
         "ls        - bestanden tonen",
         "cat <f>   - bestand lezen",
@@ -82,7 +83,8 @@ static const page_t NL[] = {
         "bat       - batterij tonen",
         "fm        - bestandsbeheer",
         "reboot    - herstarten",
-        "ALPHA: letters  SHIFT: = _ [ ]", NULL } },
+        "ALPHA: letters (grijs)",
+        "SHIFT: tekens in oranje", NULL } },
     { "Spellen", {
         "Tetris: L/R schuiven,",
         "  UP draaien, DOWN sneller",
@@ -147,7 +149,8 @@ static const page_t EN[] = {
         "open(n).read(), open(n,'w')",
         "os.listdir() remove() stat()",
         "BACK: stop a script",
-        "Empty line + EXE: run block", NULL } },
+        "Empty line + EXE: run block",
+        "SHIFT 0: #   SHIFT .: %", NULL } },
     { "Shell", {
         "ls        - list files",
         "cat <f>   - show a file",
@@ -158,7 +161,8 @@ static const page_t EN[] = {
         "bat       - battery",
         "fm        - file manager",
         "reboot    - restart",
-        "ALPHA: letters  SHIFT: = _ [ ]", NULL } },
+        "ALPHA: letters (in grey)",
+        "SHIFT: signs in orange", NULL } },
     { "Games", {
         "Tetris: L/R move,",
         "  UP rotate, DOWN drop",

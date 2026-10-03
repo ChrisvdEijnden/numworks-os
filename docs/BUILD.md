@@ -76,26 +76,43 @@ The C code is compiled against newlib's own headers (`-std=gnu11`);
 ## Simulator
 
 The OS can run in a window on a Mac or a Linux PC: the same code as
-on the calculator, compiled for the PC, in a window that looks like a
-white N0110, with its screen and keypad. It needs SDL2 and a C compiler (on a Mac: Xcode's command-line
-tools).
+on the calculator, compiled for the PC, in the same picture of the
+calculator as NumWorks' online simulator. It needs SDL2, SDL2_image
+(it reads that picture) and a C compiler (on a Mac: Xcode's
+command-line tools).
 
 macOS:
 
 ```bash
-brew install sdl2
+brew install sdl2 sdl2_image
 make run-sim
 ```
 
 Ubuntu or Debian:
 
 ```bash
-sudo apt install libsdl2-dev
+sudo apt install libsdl2-dev libsdl2-image-dev
 make run-sim
 ```
 
 `make run-sim` builds `build/sim/numworks-sim` and starts it. With
 `make mp` done first, Python is in it too.
+
+**The picture** is NumWorks' own, from their online simulator: the
+calculator, its keys, and where each one is. It is NumWorks' work (all
+rights reserved), so it isn't in this repository: the first
+`make run-sim` downloads it from their public Epsilon repository on
+GitHub (two files, at a fixed version) into `build/sim/skin/`, for your
+own use; `make sim-skin` does just that. Our screen goes where theirs
+is, keys are shaded under the mouse and when pressed, as on their
+website, and the LED shows at the top right while it's lit. Without
+SDL2_image or the download (offline, say), the simulator draws a
+calculator of its own instead; `--no-skin` asks for that one.
+
+The labels on the keys are NumWorks'; this OS follows them: SHIFT
+types the signs printed in orange, ALPHA the letters in grey. In the
+math apps SHIFT gives the inverse functions printed on sin, cos and
+tan, and also cbrt on √, exp on ln, 10^ on log and e on e^x.
 
 **Keys.** Click the keys in the window, or use the PC keyboard:
 
@@ -125,8 +142,11 @@ asks to format it, like a new calculator. Options, after
 
 - `--storage FILE`: keep the files somewhere else
 - `--fresh`: start with empty storage
-- `--scale F`: the window's size, 1 for the full 800 × 1600 picture
-  (by default it fits the screen; it can also be resized)
+- `--scale F`: the window's size, 1 for the full-size picture, where
+  the screen is 640 × 480 (by default the window fits your screen; it
+  can also be resized)
+- `--skin DIR`: NumWorks' picture from somewhere else; `--no-skin`: the
+  drawn calculator
 - `--no-usb`: no PC transfer port
 
 **PC transfer.** The simulator opens a pseudo-terminal in place of the
@@ -152,8 +172,8 @@ Steps, separated by `;`: `wait MS`, `key NAME` (`OK`, `EXE`, `HOME`,
 MS`, `type TEXT`, `uart TEXT` (a line for the shell), `shot FILE.bmp`
 (the window), `screen FILE.bmp` (the calculator screen) and `quit`.
 `--headless` runs without a window. `tests/run.sh sim` uses this.
-`shot` saves the whole calculator (800 × 1600), `screen` the 320 × 240
-screen.
+`shot` saves the whole calculator (1077 × 2006 in NumWorks' picture,
+800 × 1600 drawn), `screen` the 320 × 240 screen.
 
 **What is simulated.** The display, keyboard and crash-screen drivers
 are the calculator's own; below them, `sim/` stands in for the

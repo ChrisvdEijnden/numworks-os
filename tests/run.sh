@@ -23,7 +23,7 @@ SAN="-g -w -fsanitize=address,undefined"
 JOBS=$(nproc 2> /dev/null || sysctl -n hw.ncpu 2> /dev/null || echo 4)
 
 SUITES="flashfs qspi expr equations keyboard tetris functions editor scheduler
-        shell crash sleep display hal usb apps python transfer web loader sim"
+        shell crash sleep display hal usb apps python transfer web loader skin sim"
 
 # ── Helpers ────────────────────────────────────────────────────────
 skip() { echo "SKIP: $*"; return 77; }
@@ -153,6 +153,9 @@ t_loader() {
     python3 "$T/loader/loader_emu.py" "$D/loader/loader.bin" "$D/os/numworks_os_n0120.bin" "$D/quick/loader.bin"
 }
 
+t_skin() {
+    $CC $SAN -o "$D/t" "$T/sim/skin_test.c" sim/sim_skin.c -lm && "$D/t"
+}
 t_sim() {
     { pkg-config --exists sdl2 2> /dev/null || sdl2-config --version > /dev/null 2>&1; } ||
         { skip "needs SDL2 (brew install sdl2, or apt install libsdl2-dev)"; return; }

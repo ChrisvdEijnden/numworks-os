@@ -191,8 +191,10 @@ apart. Arrows and backspace repeat after 500 ms, every 100 ms. A row
 or column pin that another peripheral already owns is left alone and
 logged.
 
-`key_to_char()` maps keys to characters: ALPHA gives the letters printed
-on the keys, and SHIFT gives `[ ] { } = _ < > #`. The math apps use
+`key_to_char()` maps keys to characters as NumWorks prints them: ALPHA
+gives the letters in grey, SHIFT the signs in orange (`[ ] { }` on e^x,
+ln, log, i; `_ = < >` on the comma, π, √, x²), plus `#` on 0 and `%` on
+the dot for Python. The math apps use
 `expr_key_text()`, which types whole tokens (`sin(`, `^2`, `pi`, `ans`).
 
 ## Display
@@ -544,11 +546,23 @@ thread keeps the window (SDL2). The cut is as low as possible:
 A restart (`hal_reset()`) re-executes the simulator; the storage file
 stays.
 
-The window (`sim/sim_window.c`) is drawn in software: a white
-calculator, upright, with the screen (each pixel 2 × 2), the LED above
-it and the N0110's keypad, each key with what SHIFT (orange) and ALPHA
-(grey) make of it in this OS. The picture is 800 × 1600 and the window
-opens at half that or smaller to fit the screen, so on a Retina screen
-every pixel is sharp. The calculator body without pressed keys is drawn
-once; each frame copies it and draws the pressed keys, the screen and
-the LED.
+The window shows NumWorks' own simulator picture, as on their website
+(`sim/sim_skin.c`). `make run-sim` downloads it with its layout
+(`layout.json`: the screen and each key as rectangles) from NumWorks'
+Epsilon repository, at a fixed commit, into `build/sim/skin/`; it is
+theirs (all rights reserved) and not in this repository. Their build
+crops the picture to the calculator (1005 × 1975 at 93, 13) and resizes
+it to the layout's size; the online simulator shows it whole, with the
+shadow, so the layout's rectangles are mapped back onto the whole
+picture. It is read with SDL2_image (WebP), scaled once so the screen
+in it is 640 × 480 (each pixel 2 × 2), and put on a white page; keys
+under the mouse or held down are shaded black at 10 % and 20 %, as the
+website does.
+
+Without the picture (no SDL2_image, no download, or `--no-skin`) the
+window draws a calculator itself (`sim/sim_window.c`): white, upright,
+with the N0110's keypad, each key with what SHIFT (orange) and ALPHA
+(grey) make of it. Either way the picture is drawn at twice the size
+the window opens at, so on a Retina screen every pixel is sharp; the
+calculator without pressed keys is made once, and each frame copies it
+and draws the pressed keys, the screen and the LED.

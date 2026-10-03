@@ -205,7 +205,7 @@ MP_LDFLAGS := -Wl,--wrap=nlr_jump_fail
 endif
 
 .PHONY: all clean distclean flash dfu size dump mp phi delta openocd help print-libs print-newlib \
-        loader flash-loader backup-internal restore-internal test sim run-sim
+        loader flash-loader backup-internal restore-internal test sim run-sim sim-skin FORCE
 
 # Refuse to flash the image at an address it isn't linked for: it would
 # not run there (the vector table and every absolute address would be wrong).
@@ -366,10 +366,25 @@ SIM_CC     ?= cc
 SIM_BUILD  := $(BUILD)/sim
 SIM_SDL_CFLAGS = $(shell pkg-config --cflags sdl2 2>/dev/null || sdl2-config --cflags 2>/dev/null)
 SIM_SDL_LIBS   = $(shell pkg-config --libs sdl2 2>/dev/null || sdl2-config --libs 2>/dev/null)
+# SDL2_image, if it's there, reads NumWorks' simulator picture (found
+# with pkg-config, or beside SDL2 when that isn't installed)
+SIM_IMG_PREFIX = $(shell p=$$(sdl2-config --prefix 2>/dev/null) && [ -f "$$p/include/SDL2/SDL_image.h" ] && echo "$$p")
+SIM_IMG_CFLAGS = $(shell pkg-config --cflags SDL2_image 2>/dev/null || \
+                   { [ -n "$(SIM_IMG_PREFIX)" ] && echo "-I$(SIM_IMG_PREFIX)/include/SDL2"; })
+SIM_IMG_LIBS   = $(shell pkg-config --libs SDL2_image 2>/dev/null || \
+                   { [ -n "$(SIM_IMG_PREFIX)" ] && echo "-L$(SIM_IMG_PREFIX)/lib -lSDL2_image"; })
+
+# NumWorks' own simulator picture and its layout, as on their website:
+# NumWorks' work (all rights reserved), so not in this repository;
+# make run-sim fetches them from their public Epsilon repository, at
+# the commit this was made with, for your own use.
+SIM_SKIN_DIR   := $(SIM_BUILD)/skin
+EPSILON_COMMIT := 72c8306f4fe3adf3bfc9c79802a39b80afb8e988
+EPSILON_SIM    := https://raw.githubusercontent.com/numworks/epsilon/$(EPSILON_COMMIT)/shared/ion/src/simulator
 
 SIM_OS_SRCS := $(filter-out bootloader/% hal/% kernel/kernel.c fs/storage_qspi.c usb/usb_device.c \
                  $(MP_CORE_SRCS) $(MP_GLUE_SRCS) micropython-port/mp_port.c,$(SRCS_C))
-SIM_SRCS    := sim/sim_main.c sim/sim_window.c sim/sim_hw.c sim/sim_display.c \
+SIM_SRCS    := sim/sim_main.c sim/sim_window.c sim/sim_skin.c sim/sim_hw.c sim/sim_display.c \
                sim/sim_keyboard.c sim/sim_fault.c
 SIM_GEN     := $(SIM_BUILD)/gen/kernel_host.c $(SIM_BUILD)/gen/display_host.c $(SIM_BUILD)/gen/fault_host.c
 
@@ -390,15 +405,26 @@ SIM_OBJS := $(SIM_OS_OBJS) $(SIM_GEN_OBJS) $(SIM_MP_OBJS) $(SIM_GLUE_OBJS)
 
 sim: $(SIM_BUILD)/numworks-sim
 
-# Start it; arguments with SIM_ARGS, e.g. make run-sim SIM_ARGS=--fresh
+# Start it; arguments with SIM_ARGS, e.g. make run-sim SIM_ARGS=--fresh.
+# Fetches NumWorks' picture first if it isn't there yet (without it, or
+# offline, the simulator draws its own calculator).
 run-sim: sim
+	@$(MAKE) --no-print-directory sim-skin || echo "(NumWorks' picture not fetched: the drawn calculator it is)"
 	$(SIM_BUILD)/numworks-sim $(SIM_ARGS)
+
+sim-skin:
+	@mkdir -p $(SIM_SKIN_DIR)
+	@for f in assets/epsilon/background-with-shadow.webp shared/epsilon/layout.json; do \
+	  out=$(SIM_SKIN_DIR)/$${f##*/}; [ -s "$$out" ] && continue; \
+	  echo "  GET $$out (NumWorks' simulator picture: theirs, for your own use)"; \
+	  curl -fsSL -o "$$out.tmp" "$(EPSILON_SIM)/$$f" && mv "$$out.tmp" "$$out" || { rm -f "$$out.tmp"; exit 1; }; \
+	done
 
 $(SIM_BUILD)/numworks-sim: $(SIM_OBJS)
 	@if [ -z "$(strip $(SIM_SDL_LIBS))" ]; then \
 	  echo "The simulator needs SDL2: brew install sdl2 (macOS) or apt install libsdl2-dev"; exit 1; fi
 	@echo "  LD  $@"
-	@$(SIM_CC) -o $@ $(SIM_OBJS) $(SIM_SDL_LIBS) -lpthread -lm
+	@$(SIM_CC) -o $@ $(SIM_OBJS) $(SIM_SDL_LIBS) $(SIM_IMG_LIBS) -lpthread -lm
 	@echo "Simulator: $@ (start it with make run-sim)"
 
 # One run of the generator makes all the copies
@@ -435,7 +461,16 @@ $(SIM_GLUE_OBJS): $(SIM_OBJ)/%.o: %.c
 
 # Per-file extras: the OS's main() runs in a thread; the window needs SDL
 SIM_EXTRA_main     = -Dmain=nwos_main
-SIM_EXTRA_sim_main = $(SIM_SDL_CFLAGS)
+SIM_EXTRA_sim_main = $(SIM_SDL_CFLAGS) -DSIM_SKIN_DIR='"$(abspath $(SIM_SKIN_DIR))"'
+SIM_EXTRA_sim_skin = $(SIM_SDL_CFLAGS) $(if $(SIM_IMG_LIBS),-DSIM_SKIN $(SIM_IMG_CFLAGS))
+
+# Rebuilt when SDL2_image comes or goes
+SIM_SKIN_FLAGS := $(if $(SIM_IMG_LIBS),with,without) SDL2_image
+$(SIM_BUILD)/skin.flags: FORCE
+	@mkdir -p $(@D)
+	@echo '$(SIM_SKIN_FLAGS)' | cmp -s - $@ || echo '$(SIM_SKIN_FLAGS)' > $@
+$(SIM_OBJ)/sim/sim_skin.o: $(SIM_BUILD)/skin.flags
+FORCE:
 SIM_EXTRA_sim_hw   = $(if $(MP_CORE_SRCS),-DNWOS_SIM_MICROPYTHON)
 
 ifneq ($(MP_CORE_SRCS),)
@@ -467,7 +502,7 @@ help:
 	@echo "  restore-internal - Write that backup back"
 	@echo "  test     - Run the host tests (tests/)"
 	@echo "  sim      - Build the simulator (the OS in a window; needs SDL2)"
-	@echo "  run-sim  - Build and start it"
+	@echo "  run-sim  - Build and start it (fetches NumWorks' simulator picture once)"
 	@echo "  mp       - Generate MicroPython (needs ./micropython checkout)"
 	@echo "  size     - Show firmware size"
 	@echo "  clean    - Clean build artefacts"

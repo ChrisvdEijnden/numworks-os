@@ -48,8 +48,11 @@ Navigate with the arrow keys, **OK** (or **EXE**) opens or confirms,
   **UP/DOWN** pick the function) and **TOOLBOX** finds the next zero,
   minimum, maximum or intersection to the right of it.
 - In text fields (shell, editor, Python), **ALPHA** types the letters
-  printed on the keys; SHIFT+ALPHA types capitals. **SHIFT** alone
-  types `[ ] { } = _ < > #` on `( ) × ÷ + − . 0 ,`.
+  printed in grey on the keys; SHIFT+ALPHA types capitals. **SHIFT**
+  types the signs printed in orange: `[ ] { }` on e^x, ln, log, i,
+  `_` on the comma, `=` on π, `<` and `>` on √ and x². Also, unprinted:
+  `#` on 0 and `%` on the dot, and `[ ] { } = _` again on
+  `( ) × ÷ + −`.
 - In Python, a line that opens a block (`def`, `for`, `if`, ...)
   continues on the next line, indented for you; an empty line runs the
   block. **UP** recalls the previous line.
@@ -170,9 +173,10 @@ simulated hardware, with the address and undefined-behaviour sanitizers
 (see `tests/README.md`).
 
 `make run-sim` starts the simulator: the OS in a window on a Mac or a
-Linux PC, with the screen and a clickable keypad (needs SDL2: `brew
-install sdl2` or `apt install libsdl2-dev`). See *Simulator* in
-`docs/BUILD.md`.
+Linux PC, in the same picture of the calculator as NumWorks' online
+simulator, with clickable keys (needs SDL2 and SDL2_image: `brew
+install sdl2 sdl2_image` or `apt install libsdl2-dev
+libsdl2-image-dev`). See *Simulator* in `docs/BUILD.md`.
 
 ## Look
 

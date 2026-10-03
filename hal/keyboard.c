@@ -233,15 +233,25 @@ char key_to_char(key_code_t k, bool shift, bool alpha) {
     }
     if (shift) {
         switch (k) {
+            /* as printed in orange on the keys */
+            case KEY_EXP:    return '[';
+            case KEY_LN:     return ']';
+            case KEY_LOG:    return '{';
+            case KEY_IMAG:   return '}';
+            case KEY_COMMA:  return '_';
+            case KEY_PI:     return '=';
+            case KEY_SQRT:   return '<';
+            case KEY_SQUARE: return '>';
+            /* and on keys with nothing printed, the same again and what
+             * Python needs besides */
             case KEY_LPAREN: return '[';
             case KEY_RPAREN: return ']';
             case KEY_MUL:    return '{';
             case KEY_DIV:    return '}';
             case KEY_PLUS:   return '=';
             case KEY_MINUS:  return '_';
-            case KEY_DOT:    return '<';
-            case KEY_0:      return '>';
-            case KEY_COMMA:  return '#';
+            case KEY_0:      return '#';
+            case KEY_DOT:    return '%';
             default:         break;   /* other keys type as unshifted */
         }
     }

@@ -60,6 +60,7 @@ fails there, its log in `tests/build/logs/` says why.
 | `transfer` | `usb/usb_cdc.c`, `tools/upload.py`, `transfer.py` | The PC tools against the device side over a pseudo-terminal |
 | `web` | `tools/web/uploader.html` | The browser uploader in headless Chromium, with a mocked serial port |
 | `loader` | `loader/loader.c` | The internal-flash loader in an emulated Cortex-M7 (Unicorn) with models of the QSPI controller, the AT25SF641 and the keyboard |
+| `skin` | `sim/sim_skin.c` | Reading the layout of NumWorks' simulator picture (screen and key rectangles) |
 | `sim` | the whole OS, in `sim/` | The simulator, without a window: boots on empty storage, formats it, opens the Shell and runs commands over the UART, and runs a file sent with `tools/upload.py` |
 
 ## How the code gets onto a PC

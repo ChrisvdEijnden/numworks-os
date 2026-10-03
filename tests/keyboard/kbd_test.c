@@ -55,6 +55,14 @@ int main(void) {
           key_to_char(KEY_MINUS, false, true) == ' ' && key_to_char(KEY_SIN, true, true) == 'G', "ALPHA letters a..z, space, SHIFT+ALPHA capitals");
     check(key_to_char(KEY_PLUS, true, false) == '=' && key_to_char(KEY_LPAREN, false, false) == '(' &&
           key_to_char(KEY_MINUS, true, false) == '_' && key_to_char(KEY_7, true, false) == '7', "SHIFT symbols = _ and plain ( 7");
+    check(key_to_char(KEY_EXP, true, false) == '[' && key_to_char(KEY_LN, true, false) == ']' &&
+          key_to_char(KEY_LOG, true, false) == '{' && key_to_char(KEY_IMAG, true, false) == '}' &&
+          key_to_char(KEY_COMMA, true, false) == '_' && key_to_char(KEY_PI, true, false) == '=' &&
+          key_to_char(KEY_SQRT, true, false) == '<' && key_to_char(KEY_SQUARE, true, false) == '>',
+          "SHIFT types what is printed in orange on the keys");
+    check(key_to_char(KEY_0, true, false) == '#' && key_to_char(KEY_DOT, true, false) == '%' &&
+          key_to_char(KEY_XNT, false, true) == ':' && key_to_char(KEY_TOOLBOX, false, true) == '"',
+          "and # %, ALPHA's : and \" for Python");
     printf("%s (%d failure%s)\n", fails ? "FAILED" : "ALL PASSED", fails, fails == 1 ? "" : "s");
     return fails != 0;
 }

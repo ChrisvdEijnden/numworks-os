@@ -1,9 +1,11 @@
 /* ================================================================
  * NumWorks OS — simulator: drawing the window
  *
- * A white calculator, upright: the screen (each pixel 2×2, dimmed
- * with the backlight) with the LED above it, then the keypad laid out
- * like the N0110's: the arrow ring, HOME and ON/OFF, OK and BACK, three
+ * NumWorks' own simulator picture, as on their website, with our screen
+ * and keys in it, when `make run-sim` could fetch it (sim_skin.c). Else
+ * a white calculator drawn here, upright: the screen (each pixel 2×2,
+ * dimmed with the backlight) with the LED above it, then the keypad
+ * laid out like the N0110's: the arrow ring, HOME and ON/OFF, OK and BACK, three
  * rows of function keys and four of digits. Above each key, in orange,
  * what it types with SHIFT and, in grey, with ALPHA, as this OS maps
  * them. Drawn in software into one 32-bit buffer, so the same picture
@@ -16,15 +18,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include "sim_window.h"
+#include "sim_skin.h"
 #include "sim.h"
 #include "../hal/font.h"
 #include "../hal/backlight.h"
 
-/* ── Layout ───────────────────────────────────────────────────── */
+/* ── Layout of the drawn calculator ───────────────────────────── */
+#define DRAW_W 800
+#define DRAW_H 1600
 #define BODY_X 40
 #define BODY_Y 30
-#define BODY_W (SIM_WIN_W - 2 * BODY_X)
-#define BODY_H (SIM_WIN_H - BODY_Y - 34)
+#define BODY_W (DRAW_W - 2 * BODY_X)
+#define BODY_H (DRAW_H - BODY_Y - 34)
 #define SCR_X 80
 #define SCR_Y 110
 #define SCR_SCALE 2
@@ -121,11 +126,14 @@ static const pad_key_t PAD[] = {
 
 /* ── Drawing primitives ───────────────────────────────────────── */
 static uint32_t *s_fb;
+static int s_w = DRAW_W, s_h = DRAW_H;                  /* the picture's size */
+static sim_skin_t s_skin;                               /* NumWorks' picture, if s_skin.px */
+static key_code_t s_hover = KEY_NONE;
 
 static void fill(int x, int y, int w, int h, uint32_t c) {
-    int x0 = x < 0 ? 0 : x, x1 = x + w > SIM_WIN_W ? SIM_WIN_W : x + w;
-    for (int j = y < 0 ? 0 : y; j < y + h && j < SIM_WIN_H; j++)
-        for (int i = x0; i < x1; i++) s_fb[j * SIM_WIN_W + i] = c;
+    int x0 = x < 0 ? 0 : x, x1 = x + w > s_w ? s_w : x + w;
+    for (int j = y < 0 ? 0 : y; j < y + h && j < s_h; j++)
+        for (int i = x0; i < x1; i++) s_fb[j * s_w + i] = c;
 }
 
 /* a over b, a weight 0..256 */
@@ -137,8 +145,8 @@ static uint32_t mix(uint32_t a, uint32_t b, unsigned t) {
 }
 
 static void blend(int x, int y, uint32_t c, unsigned t) {
-    if (x < 0 || y < 0 || x >= SIM_WIN_W || y >= SIM_WIN_H || t == 0) return;
-    uint32_t *p = &s_fb[y * SIM_WIN_W + x];
+    if (x < 0 || y < 0 || x >= s_w || y >= s_h || t == 0) return;
+    uint32_t *p = &s_fb[y * s_w + x];
     *p = t >= 256 ? c : mix(c, *p, t);
 }
 
@@ -368,8 +376,7 @@ static void draw_key(const pad_key_t *k, bool above) {
 
 /* ── The window ───────────────────────────────────────────────── */
 static uint32_t s_panel[SIM_PANEL_H][SIM_PANEL_W];
-static uint32_t s_base[SIM_WIN_H * SIM_WIN_W];         /* the calculator with no key down */
-static bool s_have_base;
+static uint32_t *s_base;                                /* the calculator with no key down */
 
 static uint32_t dim(uint32_t c, unsigned f) {   /* f: 0..256 */
     return (((c >> 16 & 0xFF) * f >> 8) << 16) | (((c >> 8 & 0xFF) * f >> 8) << 8) | ((c & 0xFF) * f >> 8);
@@ -380,19 +387,19 @@ static unsigned backlight_factor(void) {
     return level < 0 ? 0 : level >= 12 ? 256 : 96 + 160U * (unsigned)level / 12;   /* the default level and up: full */
 }
 
-static void draw_screen(void) {
+static void draw_screen(int sx, int sy) {
     sim_panel_read(s_panel);
     unsigned f = backlight_factor();
     for (int y = 0; y < SIM_PANEL_H; y++)
         for (int x = 0; x < SIM_PANEL_W; x++) {
             uint32_t c = dim(s_panel[y][x], f);
-            uint32_t *p = s_fb + (SCR_Y + y * SCR_SCALE) * SIM_WIN_W + SCR_X + x * SCR_SCALE;
-            p[0] = p[1] = p[SIM_WIN_W] = p[SIM_WIN_W + 1] = c;
+            uint32_t *p = s_fb + (sy + y * SCR_SCALE) * s_w + sx + x * SCR_SCALE;
+            p[0] = p[1] = p[s_w] = p[s_w + 1] = c;
         }
 }
 
 static void draw_base(void) {
-    fill(0, 0, SIM_WIN_W, SIM_WIN_H, C_DESK);
+    fill(0, 0, s_w, s_h, C_DESK);
     fill_round(BODY_X - 2, BODY_Y + 6, BODY_W + 4, BODY_H + 4, 72, C_SHADOW);
     fill_round(BODY_X, BODY_Y, BODY_W, BODY_H, 70, C_BODY);
     fill_round(SCR_X - 16, SCR_Y - 16, SIM_PANEL_W * SCR_SCALE + 32, SIM_PANEL_H * SCR_SCALE + 32, 14, C_BEZEL);
@@ -401,11 +408,57 @@ static void draw_base(void) {
         if (PAD[i].shape != RING) draw_key(&PAD[i], true);
 }
 
-void sim_window_draw(uint32_t *fb) {
+/* ── NumWorks' picture: a key under the mouse or down is shaded, as on
+ * the online simulator (black, 10 % and 20 %, over the key's shape) ── */
+static void shade_key(const skin_key_t *k, unsigned t) {
+    int r = (k->w < k->h ? k->w : k->h) / 2;
+    for (int j = 0; j < k->h; j++)
+        for (int i = 0; i < k->w; i++) {
+            /* distance outside the rounded rectangle, for smooth edges */
+            double dx = fmax(fmax(r - (i + 0.5), (i + 0.5) - (k->w - r)), 0);
+            double dy = fmax(fmax(r - (j + 0.5), (j + 0.5) - (k->h - r)), 0);
+            double cover = r + 0.5 - hypot(dx, dy);
+            if (cover > 0) blend(k->x + i, k->y + j, 0, (unsigned)(t * fmin(cover, 1)));
+        }
+}
+
+static void draw_skin(void) {
+    for (int i = 0; i < s_skin.nkeys; i++) {
+        const skin_key_t *k = &s_skin.keys[i];
+        if (sim_key_down(k->key)) shade_key(k, 51);
+        else if (k->key == s_hover) shade_key(k, 26);
+    }
+    draw_screen(s_skin.scr_x, s_skin.scr_y);
+    uint32_t led = sim_led_rgb();                       /* the LED, only while it's lit */
+    if (led) {
+        disc(s_skin.led_x, s_skin.led_y, 14, mix(led, s_fb[s_skin.led_y * s_w + s_skin.led_x], 70));
+        disc(s_skin.led_x, s_skin.led_y, 7, led);
+    }
+}
+
+bool sim_window_init(const char *skin_dir) {
+    free(s_base);
+    free(s_skin.px);
+    memset(&s_skin, 0, sizeof s_skin);
+    bool skin = skin_dir && sim_skin_load(skin_dir, &s_skin);
+    s_w = skin ? s_skin.w : DRAW_W;
+    s_h = skin ? s_skin.h : DRAW_H;
+    s_base = malloc(sizeof(uint32_t) * (size_t)s_w * (size_t)s_h);
+    if (!s_base) { perror("sim"); exit(1); }
     s_fb = s_base;
-    if (!s_have_base) { draw_base(); s_have_base = true; }
-    memcpy(fb, s_base, sizeof s_base);
+    if (skin) memcpy(s_base, s_skin.px, sizeof(uint32_t) * (size_t)s_w * (size_t)s_h);
+    else draw_base();
+    return skin;
+}
+
+int sim_window_w(void) { return s_w; }
+int sim_window_h(void) { return s_h; }
+
+void sim_window_draw(uint32_t *fb) {
+    if (!s_base) sim_window_init(NULL);
+    memcpy(fb, s_base, sizeof(uint32_t) * (size_t)s_w * (size_t)s_h);
     s_fb = fb;
+    if (s_skin.px) { draw_skin(); return; }
     /* keys that are down, drawn again on a clean patch of the body */
     if (ring_down()) draw_ring();
     for (unsigned i = 0; i < NPAD; i++) {
@@ -415,13 +468,20 @@ void sim_window_draw(uint32_t *fb) {
         else fill(k->x - 3, k->y - 3, k->w + 6, k->h + 10, C_BODY);
         draw_key(k, false);
     }
-    draw_screen();
+    draw_screen(SCR_X, SCR_Y);
     uint32_t led = sim_led_rgb();                         /* the LED, above the screen */
     disc(LED_X, LED_Y, 8, 0xA9ACB2);
     disc(LED_X, LED_Y, 6, led ? led : 0xDADCE0);
 }
 
 key_code_t sim_window_key_at(int x, int y) {
+    if (s_skin.px) {
+        for (int i = 0; i < s_skin.nkeys; i++) {
+            const skin_key_t *k = &s_skin.keys[i];
+            if (x >= k->x - 4 && x < k->x + k->w + 4 && y >= k->y - 4 && y < k->y + k->h + 4) return k->key;
+        }
+        return KEY_NONE;
+    }
     double rd = hypot(x + 0.5 - PAD_CX, y + 0.5 - PAD_CY);
     if (rd >= PAD_RI && rd <= PAD_RO) {
         int i = x - PAD_CX, j = y - PAD_CY;
@@ -438,6 +498,8 @@ key_code_t sim_window_key_at(int x, int y) {
     }
     return KEY_NONE;
 }
+
+void sim_window_hover(int x, int y) { s_hover = s_skin.px ? sim_window_key_at(x, y) : KEY_NONE; }
 
 /* 24-bit BMP, bottom-up: no library needed */
 static void le(uint8_t *p, uint32_t v, int n) { for (int i = 0; i < n; i++) p[i] = (uint8_t)(v >> (8 * i)); }
@@ -456,11 +518,13 @@ bool sim_save_bmp(const char *path, const uint32_t *px, int w, int h, int stride
     le(hdr + 28, 24, 2);
     le(hdr + 34, (uint32_t)(row * h), 4);
     fwrite(hdr, 1, sizeof hdr, f);
-    uint8_t line_buf[SIM_WIN_W * 3 + 4] = { 0 };
+    uint8_t *line_buf = calloc(1, (size_t)row);
+    if (!line_buf) { fclose(f); return false; }
     for (int y = h - 1; y >= 0; y--) {
         for (int x = 0; x < w; x++) le(line_buf + 3 * x, px[y * stride + x], 3);
         fwrite(line_buf, 1, (size_t)row, f);
     }
+    free(line_buf);
     return fclose(f) == 0;
 }
 
