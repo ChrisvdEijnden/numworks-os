@@ -9,6 +9,7 @@ void functions_init(void); void functions_handle_event(const kernel_event_t*); c
 #include "../../apps/common/analysis.h"
 #include "../../ui/lang.h"
 #include <math.h>
+#include "../../hal/display.h"
 void text_editor_init(void); void text_editor_handle_event(const kernel_event_t*); const char *et_name(void); bool et_modified(void);
 void display_pixel(int16_t x, int16_t y, uint16_t c) {(void)x;(void)y;(void)c;}
 void display_fill_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t c) {(void)x;(void)y;(void)w;(void)h;(void)c;}
@@ -17,8 +18,10 @@ void display_vline(int16_t x, int16_t y, int16_t h, uint16_t c) {(void)x;(void)y
 void display_fill(uint16_t c) {(void)c;}
 void display_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t c) {(void)x;(void)y;(void)w;(void)h;(void)c;}
 void display_str_len(int16_t x, int16_t y, const char *s, int len, uint16_t a, uint16_t b) {(void)x;(void)y;(void)s;(void)len;(void)a;(void)b;}
+/* the footer's text: the line at the bottom of the screen, from the left */
 static char footer[128];
-void display_str(int16_t x, int16_t y, const char *s, uint16_t a, uint16_t b) {(void)x;(void)a;(void)b; if (y >= 226) snprintf(footer, sizeof footer, "%s", s);}
+void display_text_n(int16_t x, int16_t y, const char *s, int n, const font_t *f, uint16_t a, uint16_t b) {
+    (void)f;(void)a;(void)b; if (y >= 220 && x < 20) snprintf(footer, sizeof footer, "%.*s", n, s); }
 void kernel_set_app(app_state_t a) {(void)a;}
 char key_to_char(key_code_t k, bool shift, bool alpha);   /* real one from keyboard.c (linked) */
 /* in-memory flashfs */

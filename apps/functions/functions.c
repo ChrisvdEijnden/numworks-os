@@ -12,7 +12,7 @@
  *               visible window (apps/common/analysis.c)
  *  - Table: x and f(x)
  *
- * Graph area: x=0..319, y=28..221 (194 px), footer below.
+ * Graph area: x=0..319, below the title and tab bars, a banner under it.
  * Coordinate system: [-10..10] x [-6..6] by default.
  * ================================================================ */
 #include "functions.h"
@@ -22,13 +22,14 @@
 #include "../common/analysis.h"
 #include "../../include/config.h"
 #include "../../ui/lang.h"
+#include "../../ui/theme.h"
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
 
-#define HEADER_H  28
-#define FOOTER_H  18
+#define HEADER_H  (UI_TITLE_H + UI_TAB_H)
+#define FOOTER_H  20
 #define GRAPH_Y0  HEADER_H
 #define GRAPH_H   (LCD_HEIGHT - HEADER_H - FOOTER_H)
 #define GRAPH_W   LCD_WIDTH
@@ -37,10 +38,6 @@
 #define MAX_FNS   4
 #define FN_LEN    48
 
-#define C_BG      RGB(10,10,20)
-#define C_HDR     RGB(30,80,200)
-#define C_PLOT    RGB(5,5,15)
-#define C_FOOT    RGB(25,25,40)
 
 typedef enum { VIEW_GRAPH, VIEW_TABLE, VIEW_ENTER } fn_view_t;
 typedef enum { AN_ZERO, AN_MIN, AN_MAX, AN_CROSS, AN_COUNT } an_kind_t;
@@ -63,9 +60,7 @@ static bool     s_menu   = false;
 static int      s_menu_sel = 0;
 static char     s_info[64];     /* footer text: cursor or analysis result */
 
-static const uint16_t COLOURS[MAX_FNS] = {
-    RGB(80,200,255), RGB(255,160,40), RGB(100,255,100), RGB(255,80,200)
-};
+static const uint16_t COLOURS[MAX_FNS] = { T_RED, T_BLUE, T_GREEN, T_YELLOW };
 
 /* ── Coordinates and evaluation ───────────────────────────────── */
 static double scr_to_wx(int sx) { return s_xmin + (double)sx / GRAPH_W * (s_xmax - s_xmin); }
@@ -86,11 +81,24 @@ static double eval_fn(int fi, double x) {
 static bool finite_d(double v) { return !isnan(v) && !isinf(v); }
 
 /* ── Drawing ───────────────────────────────────────────────────── */
+/* A light grid (a line per unit, or per 10 when that's too dense),
+ * then the axes */
+static void grid_lines(double lo, double hi, int pixels, bool vertical) {
+    double step = 1.0;
+    while ((hi - lo) / step > pixels / 8.0) step *= 10.0;
+    for (double v = ceil(lo / step) * step; v <= hi; v += step) {
+        if (vertical) { int sx = wx_to_scr(v); if (sx >= 0 && sx < GRAPH_W) display_vline(sx, GRAPH_Y0, GRAPH_H, T_WALL_DARK); }
+        else { int sy = wy_to_scr(v); if (sy >= GRAPH_Y0 && sy < GRAPH_Y0 + GRAPH_H) display_hline(0, sy, GRAPH_W, T_WALL_DARK); }
+    }
+}
+
 static void draw_axes(void) {
+    grid_lines(s_xmin, s_xmax, GRAPH_W, true);
+    grid_lines(s_ymin, s_ymax, GRAPH_H, false);
     int y0 = wy_to_scr(0.0);
-    if (y0 >= GRAPH_Y0 && y0 < GRAPH_Y0 + GRAPH_H) display_hline(0, y0, GRAPH_W, RGB(80,80,80));
+    if (y0 >= GRAPH_Y0 && y0 < GRAPH_Y0 + GRAPH_H) display_hline(0, y0, GRAPH_W, T_GRAY_DARKEST);
     int xs = wx_to_scr(0.0);
-    if (xs >= 0 && xs < GRAPH_W) display_vline(xs, GRAPH_Y0, GRAPH_H, RGB(80,80,80));
+    if (xs >= 0 && xs < GRAPH_W) display_vline(xs, GRAPH_Y0, GRAPH_H, T_GRAY_DARKEST);
 }
 
 static bool on_graph(int sy) { return sy >= GRAPH_Y0 && sy < GRAPH_Y0 + GRAPH_H; }
@@ -107,9 +115,9 @@ static void plot_fn(int fi) {
             int a = prev_sy < sy ? prev_sy : sy, b = prev_sy < sy ? sy : prev_sy;
             if (a < GRAPH_Y0) a = GRAPH_Y0;
             if (b > GRAPH_Y0 + GRAPH_H - 1) b = GRAPH_Y0 + GRAPH_H - 1;
-            for (int yy = a; yy <= b; yy++) display_pixel(sx, yy, COLOURS[fi]);
+            for (int yy = a; yy <= b; yy++) display_fill_rect(sx, yy, 2, 2, COLOURS[fi]);
         } else if (on_graph(sy)) {
-            display_pixel(sx, sy, COLOURS[fi]);
+            display_fill_rect(sx, sy, 2, 2, COLOURS[fi]);
         }
         have_prev = true;
         prev_sy = sy;
@@ -127,12 +135,12 @@ static void fmt_num(char *buf, int n, double v, double scale) {
 static void draw_cursor(void) {
     double y = eval_fn(s_sel, s_tx);
     int sx = wx_to_scr(s_tx);
-    if (sx >= 0 && sx < GRAPH_W) display_vline(sx, GRAPH_Y0, GRAPH_H, RGB(70,70,100));
+    if (sx >= 0 && sx < GRAPH_W) display_vline(sx, GRAPH_Y0, GRAPH_H, T_GRAY_DARK);
     if (finite_d(y)) {
         int sy = wy_to_scr(y);
         if (on_graph(sy)) {
-            display_fill_rect(sx - 3, sy - 3, 7, 7, WHITE);
-            display_fill_rect(sx - 2, sy - 2, 5, 5, COLOURS[s_sel]);
+            display_fill_rect(sx - 4, sy - 4, 9, 9, T_TEXT);
+            display_fill_rect(sx - 3, sy - 3, 7, 7, COLOURS[s_sel]);
         }
     }
 }
@@ -154,32 +162,43 @@ static const char *an_name(int k) {
     }
 }
 
+/* A pop-up over the graph: a dark title strip, then the choices */
 static void draw_menu(void) {
-    int x = 80, y = GRAPH_Y0 + 30, w = 160, h = 20 + AN_COUNT * 20;
-    display_fill_rect(x, y, w, h, RGB(30,30,55));
-    display_rect(x, y, w, h, RGB(140,140,200));
-    display_str(x + 8, y + 6, TR("Analyse", "Analysis"), YELLOW, RGB(30,30,55));
+    int16_t x = 70, y = GRAPH_Y0 + 18, w = 180, h = 22 + AN_COUNT * 26;
+    display_fill_rect(x, y, w, h, WHITE);
+    display_rect(x - 1, y - 1, w + 2, h + 2, T_GRAY_DARK);
+    display_fill_rect(x, y, w, 22, RGB(0x69, 0x64, 0x75));
+    ui_text_center(x + w / 2, y + 4, TR("Analyse", "Analysis"), &font_small, WHITE, RGB(0x69, 0x64, 0x75));
     for (int i = 0; i < AN_COUNT; i++) {
-        uint16_t bg = i == s_menu_sel ? RGB(60,90,200) : RGB(30,30,55);
-        display_fill_rect(x + 2, y + 20 + i * 20, w - 4, 18, bg);
-        display_str(x + 10, y + 25 + i * 20, an_name(i), WHITE, bg);
+        uint16_t bg = i == s_menu_sel ? T_SELECT : WHITE;
+        display_fill_rect(x, (int16_t)(y + 22 + i * 26), w, 26, bg);
+        display_hline(x, (int16_t)(y + 22 + i * 26), w, T_GRAY_BRIGHT);
+        display_text((int16_t)(x + 10), (int16_t)(y + 22 + i * 26 + 6), an_name(i), &font_small, T_TEXT, bg);
     }
 }
 
 static void draw_footer(void) {
-    display_fill_rect(0, LCD_HEIGHT - FOOTER_H, LCD_WIDTH, FOOTER_H, C_FOOT);
+    display_fill_rect(0, LCD_HEIGHT - FOOTER_H, LCD_WIDTH, FOOTER_H, T_GRAY_BRIGHT);
+    display_hline(0, LCD_HEIGHT - FOOTER_H, LCD_WIDTH, T_GRAY_MIDDLE);
     const char *t = s_info[0] ? s_info
-        : s_trace ? TR("L/R:Volg  U/D:Functie  TOOLBOX:Analyse", "L/R:Trace  U/D:Function  TOOLBOX:Analysis")
-                  : TR("OK:Volg  TOOLBOX:Analyse  +/-:Zoom", "OK:Trace  TOOLBOX:Analysis  +/-:Zoom");
-    display_str(4, LCD_HEIGHT - FOOTER_H + 5, t, s_info[0] ? WHITE : YELLOW, C_FOOT);
+        : s_trace ? TR("L/R:volg  U/D:functie  TOOLBOX:analyse", "L/R:trace  U/D:function  TOOLBOX:analysis")
+                  : TR("OK:volg  TOOLBOX:analyse  +/-:zoom", "OK:trace  TOOLBOX:analysis  +/-:zoom");
+    display_text(6, LCD_HEIGHT - FOOTER_H + 4, t, &font_small, s_info[0] ? T_TEXT : T_GRAY_VDARK, T_GRAY_BRIGHT);
+}
+
+/* Title and tabs: which view is shown */
+static void draw_header(int tab) {
+    static const char *nl[3] = { "Expressies", "Grafiek", "Tabel" };
+    static const char *en[3] = { "Expressions", "Graph", "Table" };
+    const char *names[3];
+    for (int i = 0; i < 3; i++) names[i] = TR(nl[i], en[i]);
+    ui_title_bar_mods(TR("Functies", "Functions"), s_shift, false);
+    ui_tabs(UI_TITLE_H, names, 3, tab, false);
 }
 
 static void draw_graph(void) {
-    display_fill_rect(0, GRAPH_Y0, GRAPH_W, GRAPH_H, C_PLOT);
-    display_fill_rect(0, 0, LCD_WIDTH, HEADER_H, C_HDR);
-    display_str(6, 8, TR("Grafiek", "Graph"), WHITE, C_HDR);
-    display_str(LCD_WIDTH - 156, 8, TR("VAR:Tabel ALPHA:Invoer", "VAR:Table ALPHA:Edit"),
-                RGB(180,200,255), C_HDR);
+    draw_header(1);
+    display_fill_rect(0, GRAPH_Y0, GRAPH_W, GRAPH_H, WHITE);
     draw_axes();
     for (int i = 0; i < s_nfn; i++) plot_fn(i);
     if (s_trace && s_nfn > 0) draw_cursor();
@@ -187,46 +206,57 @@ static void draw_graph(void) {
     if (s_menu) draw_menu();
 }
 
+/* x and f(x) in two columns, rows alternately white and light grey */
 static void draw_table(void) {
-    display_fill(C_BG);
-    display_fill_rect(0, 0, LCD_WIDTH, HEADER_H, C_HDR);
-    char title[32];
-    snprintf(title, sizeof title, TR("Tabel  f%d(x)", "Table  f%d(x)"), s_sel + 1);
-    display_str(6, 8, s_nfn ? title : TR("Tabel", "Table"), WHITE, C_HDR);
-    if (s_nfn == 0) { display_str(10, 50, TR("Geen functies", "No functions"), WHITE, C_BG); return; }
-    display_str(2, HEADER_H + 2, "  x       f(x)", YELLOW, C_BG);
-    for (int r = 0; r < 12; r++) {
-        double x = s_xmin + r * (s_xmax - s_xmin) / 12.0;
-        double y = eval_fn(s_sel, x);
-        char line[48];
-        snprintf(line, sizeof(line), "%7.3f  %10.4f", x, y);
-        display_str(2, HEADER_H + 16 + r * 14, line, RGB(200,230,255), C_BG);
+    draw_header(2);
+    display_fill_rect(0, UI_TITLE_H + UI_TAB_H, LCD_WIDTH, LCD_HEIGHT - UI_TITLE_H - UI_TAB_H, WHITE);
+    if (s_nfn == 0) {
+        ui_text_center(LCD_WIDTH / 2, 120, TR("Geen functies", "No functions"), &font_large, T_GRAY_VDARK, WHITE);
+        return;
     }
-    display_str(2, LCD_HEIGHT - 12, TR("UP/DOWN: andere functie", "UP/DOWN: other function"), GREY, C_BG);
+    int16_t y0 = UI_TITLE_H + UI_TAB_H, cw = LCD_WIDTH / 2, rh = 16;
+    char head[16];
+    snprintf(head, sizeof head, "f%d(x)", s_sel + 1);
+    display_fill_rect(0, y0, LCD_WIDTH, 22, T_GRAY_WHITE);
+    display_fill_rect(cw, y0, cw, 2, COLOURS[s_sel]);
+    ui_text_center(cw / 2, (int16_t)(y0 + 4), "x", &font_small, T_TEXT, T_GRAY_WHITE);
+    ui_text_center((int16_t)(cw + cw / 2), (int16_t)(y0 + 4), head, &font_small, T_TEXT, T_GRAY_WHITE);
+    for (int r = 0; r < 10; r++) {
+        double x = s_xmin + r * (s_xmax - s_xmin) / 10.0;
+        double y = eval_fn(s_sel, x);
+        int16_t ry = (int16_t)(y0 + 22 + r * rh);
+        uint16_t bg = r % 2 ? T_WALL : WHITE;
+        display_fill_rect(0, ry, LCD_WIDTH, rh, bg);
+        char a[24], b[24];
+        snprintf(a, sizeof a, "%.4g", x);
+        if (finite_d(y)) snprintf(b, sizeof b, "%.6g", y); else snprintf(b, sizeof b, TR("ongedef.", "undef"));
+        ui_text_right((int16_t)(cw - 10), (int16_t)(ry + 1), a, &font_small, T_TEXT, bg);
+        ui_text_right((int16_t)(LCD_WIDTH - 10), (int16_t)(ry + 1), b, &font_small, T_TEXT, bg);
+    }
+    display_vline(cw, y0, (int16_t)(22 + 10 * rh), T_GRAY_MIDDLE);
 }
 
+/* Up to four functions, each with its colour on the left */
 static void draw_enter(void) {
-    display_fill(C_BG);
-    display_fill_rect(0, 0, LCD_WIDTH, HEADER_H, C_HDR);
-    display_str(6, 8, TR("Functies invoeren", "Enter functions"), WHITE, C_HDR);
+    draw_header(0);
+    display_fill_rect(0, UI_TITLE_H + UI_TAB_H, LCD_WIDTH, LCD_HEIGHT - UI_TITLE_H - UI_TAB_H, T_WALL);
     for (int i = 0; i < MAX_FNS; i++) {
-        int y = HEADER_H + 8 + i * 30;
+        int16_t y = (int16_t)(UI_TITLE_H + UI_TAB_H + 8 + i * 34);
         bool active = (i == s_row && s_view == VIEW_ENTER);
-        uint16_t bg = active ? RGB(40,40,70) : RGB(20,20,35);
-        display_fill_rect(0, y, LCD_WIDTH, 24, bg);
+        uint16_t bg = active ? T_SELECT : WHITE;
+        display_fill_rect(0, y, LCD_WIDTH, 34, bg);
+        display_hline(0, (int16_t)(y + 33), LCD_WIDTH, T_GRAY_BRIGHT);
+        display_fill_rect(0, y, 3, 34, COLOURS[i]);
         char label[64];
-        snprintf(label, sizeof(label), "f%d(x)= %.47s%s",
-                 i + 1, active ? s_entry : (i < s_nfn ? s_fn[i] : ""), active ? "_" : "");
-        display_str(4, y + 6, label, COLOURS[i], bg);
+        const char *body = active ? s_entry : (i < s_nfn ? s_fn[i] : "");
+        snprintf(label, sizeof(label), "f%d(x)=%.47s", i + 1, body);
+        display_text(12, (int16_t)(y + 8), label, &font_large, i < s_nfn || active ? T_TEXT : T_GRAY_DARK, bg);
+        if (active) display_fill_rect((int16_t)(12 + (int)strlen(label) * 10), (int16_t)(y + 7), 1, 20, T_TEXT);
     }
-    display_str(4, HEADER_H + 140, TR("OK:Opslaan  UP/DOWN:Kies  TOOLBOX:Grafiek",
-                                      "OK:Save  UP/DOWN:Select  TOOLBOX:Graph"), YELLOW, C_BG);
-    display_str(4, HEADER_H + 154, TR("VAR:Tabel  leeg+OK:Wis  HOME:Terug",
-                                      "VAR:Table  empty+OK:Delete  HOME:Back"), YELLOW, C_BG);
-    display_str(4, HEADER_H + 168, s_shift ? TR("SHIFT actief: sin=asin  ln=exp", "SHIFT on: sin=asin  ln=exp")
-                                           : TR("XNT: x   SHIFT: inverse functie", "XNT: x   SHIFT: inverse function"),
-                s_shift ? CYAN : GREY, C_BG);
-    if (s_msg[0]) display_str(4, HEADER_H + 184, s_msg, RED, C_BG);
+    int16_t hy = (int16_t)(UI_TITLE_H + UI_TAB_H + 8 + MAX_FNS * 34 + 6);
+    display_text(8, hy, TR("TOOLBOX: grafiek  VAR: tabel  leeg+OK: wis", "TOOLBOX: graph  VAR: table  empty+OK: delete"),
+                 &font_small, T_GRAY_VDARK, T_WALL);
+    if (s_msg[0]) display_text(8, (int16_t)(hy + 16), s_msg, &font_small, T_RED, T_WALL);
 }
 
 void functions_redraw(void) {

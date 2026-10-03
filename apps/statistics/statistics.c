@@ -24,25 +24,23 @@
 #include "../../fs/flashfs.h"
 #include "../../include/config.h"
 #include "../../ui/lang.h"
+#include "../../ui/theme.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define C_BG    RGB(10,10,20)
-#define C_HDR   RGB(30,80,200)
-#define C_TAB   RGB(20,50,140)
-#define C_CELL  RGB(20,20,35)
-#define C_SEL   RGB(60,60,120)
-#define C_TEXT  RGB(220,230,255)
-
-#define HEADER_H 24
-#define ROW_H    16
-#define TABLE_Y  (HEADER_H + 18)
-#define VIS_ROWS ((LCD_HEIGHT - TABLE_Y - 14) / ROW_H)
-#define COL_X    40
-#define COL_Y    180
-#define COL_W    136
+#define HEADER_H  (UI_TITLE_H + UI_TAB_H)
+#define FOOTER_H  20
+#define HEAD_ROW  22                         /* the column titles */
+#define ROW_H     19
+#define TABLE_Y   (HEADER_H + HEAD_ROW)
+#define VIS_ROWS  ((LCD_HEIGHT - FOOTER_H - TABLE_Y) / ROW_H)
+#define NUM_W     40                         /* the row numbers */
+#define COL_W     140
+#define COL_X     NUM_W
+#define COL_Y     (NUM_W + COL_W)
+#define SERIES    T_RED                      /* the colour of the data */
 
 enum { TAB_DATA, TAB_STATS, TAB_PLOT, TAB_COUNT };
 
@@ -131,22 +129,11 @@ static void save(void) {
 }
 
 /* ── Drawing ───────────────────────────────────────────────────── */
-static const char *tab_name(int t) {
-    switch (t) {
-    case TAB_DATA:  return TR("Gegevens", "Data");
-    case TAB_STATS: return TR("Statistiek", "Stats");
-    default:        return TR("Grafiek", "Plot");
-    }
-}
-
 static void draw_header(void) {
-    display_fill_rect(0, 0, LCD_WIDTH, HEADER_H, C_HDR);
-    for (int t = 0; t < TAB_COUNT; t++) {
-        int x = 4 + t * 104;
-        uint16_t bg = t == s_tab ? (s_in_tabs ? RGB(90,150,255) : C_TAB) : C_HDR;
-        display_fill_rect(x, 3, 100, HEADER_H - 6, bg);
-        display_str(x + 6, 8, tab_name(t), WHITE, bg);
-    }
+    const char *names[TAB_COUNT] = { TR("Gegevens", "Data"), TR("Statistiek", "Stats"),
+                                     TR("Grafiek", "Plot") };
+    ui_title_bar_mods(TR("Statistiek", "Statistics"), s_shift, false);
+    ui_tabs(UI_TITLE_H, names, TAB_COUNT, s_tab, s_in_tabs);
 }
 
 static void fmt(char *b, int n, double v) {
@@ -154,88 +141,143 @@ static void fmt(char *b, int n, double v) {
     else snprintf(b, (size_t)n, "%.8g", fabs(v) < 1e-12 ? 0.0 : v);
 }
 
-static void footer(const char *t, uint16_t c) {
-    display_fill_rect(0, LCD_HEIGHT - 13, LCD_WIDTH, 13, C_BG);
-    display_str(4, LCD_HEIGHT - 11, t, c, C_BG);
+/* A number in at most max characters: fewer digits when needed */
+static void fmt_fit(char *b, int n, double v, int max) {
+    for (int p = 8; p >= 3; p--) {
+        snprintf(b, (size_t)n, "%.*g", p, fabs(v) < 1e-12 ? 0.0 : v);
+        if ((int)strlen(b) <= max) return;
+    }
 }
 
+/* The grey banner at the bottom: a hint, or a message in red */
+static void footer(const char *t, bool error) {
+    display_fill_rect(0, LCD_HEIGHT - FOOTER_H, LCD_WIDTH, FOOTER_H, T_GRAY_BRIGHT);
+    display_hline(0, LCD_HEIGHT - FOOTER_H, LCD_WIDTH, T_GRAY_MIDDLE);
+    display_text(6, LCD_HEIGHT - FOOTER_H + 4, t, &font_small, error ? T_RED : T_GRAY_VDARK, T_GRAY_BRIGHT);
+}
+
+static void no_data(void) {
+    ui_text_center(LCD_WIDTH / 2, 120, TR("Nog geen gegevens", "No data yet"), &font_large, T_GRAY_VDARK,
+                   s_tab == TAB_PLOT ? WHITE : T_WALL);
+}
+
+/* The table: row numbers, then X and Y, rows alternately white and
+ * light grey, the cursor's cell shaded */
 static void draw_data(void) {
-    display_fill_rect(0, HEADER_H, LCD_WIDTH, LCD_HEIGHT - HEADER_H, C_BG);
-    display_str(4, HEADER_H + 4, "#", GREY, C_BG);
-    display_str(COL_X + 4, HEADER_H + 4, "X", YELLOW, C_BG);
-    display_str(COL_Y + 4, HEADER_H + 4, "Y", YELLOW, C_BG);
+    display_fill_rect(0, HEADER_H, LCD_WIDTH, LCD_HEIGHT - FOOTER_H - HEADER_H, WHITE);
+    display_fill_rect(0, HEADER_H, LCD_WIDTH, HEAD_ROW, T_GRAY_WHITE);
+    display_fill_rect(COL_X, HEADER_H, LCD_WIDTH - COL_X, 2, SERIES);
+    ui_text_center(COL_X + COL_W / 2, HEADER_H + 5, "X", &font_small, T_TEXT, T_GRAY_WHITE);
+    ui_text_center(COL_Y + COL_W / 2, HEADER_H + 5, "Y", &font_small, T_TEXT, T_GRAY_WHITE);
+    display_hline(0, TABLE_Y - 1, LCD_WIDTH, T_GRAY_MIDDLE);
     for (int v = 0; v < VIS_ROWS; v++) {
-        int r = s_top + v, y = TABLE_Y + v * ROW_H;
-        if (r > s_rows || r >= STATS_MAX) break;     /* row s_rows: the empty new one */
+        int r = s_top + v;
+        int16_t y = (int16_t)(TABLE_Y + v * ROW_H);
+        uint16_t even = r % 2 ? T_WALL : WHITE;
+        display_fill_rect(0, y, NUM_W, ROW_H, T_GRAY_WHITE);
+        if (r > s_rows || r >= STATS_MAX) {          /* row s_rows: the empty new one */
+            display_fill_rect(NUM_W, y, LCD_WIDTH - NUM_W, ROW_H, even);
+            continue;
+        }
         char num[12];
         snprintf(num, sizeof num, "%d", r + 1);
-        display_str(4, y + 4, num, GREY, C_BG);
+        ui_text_center(NUM_W / 2, (int16_t)(y + 3), num, &font_small, T_GRAY_VDARK, T_GRAY_WHITE);
         for (int c = 0; c < 2; c++) {
             bool sel = !s_in_tabs && r == s_row && c == s_col;
-            uint16_t bg = sel ? C_SEL : C_CELL;
-            int x = c == 0 ? COL_X : COL_Y;
-            display_fill_rect(x, y, COL_W, ROW_H - 2, bg);
+            uint16_t bg = sel ? T_SELECT : even;
+            int16_t x = c == 0 ? COL_X : COL_Y;
+            display_fill_rect(x, y, COL_W, ROW_H, bg);
             char t[28];
-            if (sel && s_editing) snprintf(t, sizeof t, "%s_", s_buf);
-            else if (r < s_rows) fmt(t, sizeof t, *cell(r, c));
+            if (sel && s_editing) {                      /* the end of what's typed, and the cursor */
+                const char *s = s_buf;
+                int fit = (COL_W - 16) / font_small.w;
+                if (s_blen > fit) s += s_blen - fit;
+                int16_t right = (int16_t)(x + COL_W - 8);
+                ui_text_right((int16_t)(right - 2), (int16_t)(y + 3), s, &font_small, T_TEXT, bg);
+                display_fill_rect(right, (int16_t)(y + 2), 1, ROW_H - 4, T_TEXT);
+                continue;
+            }
+            if (r < s_rows) fmt(t, sizeof t, *cell(r, c));
             else t[0] = 0;
             if (!strcmp(t, "-")) t[0] = 0;
-            display_str(x + 4, y + 3, t, C_TEXT, bg);
+            ui_text_right((int16_t)(x + COL_W - 8), (int16_t)(y + 3), t, &font_small, T_TEXT, bg);
         }
     }
-    if (s_msg[0]) footer(s_msg, RED);
-    else footer(TR("OK:Invoer  <-:Wis  HOME:Terug", "OK:Enter  <-:Clear  HOME:Back"), YELLOW);
+    display_vline(COL_X - 1, HEADER_H, LCD_HEIGHT - FOOTER_H - HEADER_H, T_GRAY_MIDDLE);
+    display_vline(COL_Y - 1, HEADER_H, LCD_HEIGHT - FOOTER_H - HEADER_H, T_GRAY_MIDDLE);
+    if (s_msg[0]) footer(s_msg, true);
+    else footer(TR("OK:invoer  <-:wis  HOME:terug", "OK:enter  <-:clear  HOME:back"), false);
 }
 
-static void stat_line(int col, int row, const char *label, double v) {
-    char t[32], num[20];
-    fmt(num, sizeof num, v);
-    snprintf(t, sizeof t, "%-7s %s", label, num);
-    display_str(col ? 164 : 4, HEADER_H + 6 + row * 15, t, C_TEXT, C_BG);
+/* The Stats tab: two small tables, X on the left and the regression
+ * on the right; a label and a value on each row */
+#define ST_Y    (HEADER_H + 6)
+#define ST_RH   16
+#define ST_LW   58                               /* label column */
+#define ST_W    154
+static void stat_cell(int col, int row, const char *label, double v, bool whole) {
+    int16_t x = (int16_t)(col ? LCD_WIDTH - 4 - ST_W : 4), y = (int16_t)(ST_Y + row * ST_RH);
+    uint16_t bg = row % 2 ? T_WALL : WHITE;
+    char num[24];
+    if (whole) snprintf(num, sizeof num, "%d", (int)v);
+    else fmt_fit(num, sizeof num, v, (ST_W - ST_LW - 10) / font_small.w);
+    display_fill_rect(x, y, ST_W, ST_RH, bg);
+    display_text((int16_t)(x + 5), (int16_t)(y + 1), label, &font_small, T_GRAY_DARKEST, bg);
+    ui_text_right((int16_t)(x + ST_W - 5), (int16_t)(y + 1), num, &font_small, T_TEXT, bg);
+}
+static void stat_frame(int col, int rows) {
+    int16_t x = (int16_t)(col ? LCD_WIDTH - 4 - ST_W : 4);
+    display_rect((int16_t)(x - 1), ST_Y - 1, ST_W + 2, (int16_t)(rows * ST_RH + 2), T_GRAY_MIDDLE);
+    display_vline((int16_t)(x + ST_LW), ST_Y, (int16_t)(rows * ST_RH), T_GRAY_BRIGHT);
 }
 
 static void draw_stats(void) {
-    display_fill_rect(0, HEADER_H, LCD_WIDTH, LCD_HEIGHT - HEADER_H, C_BG);
+    display_fill_rect(0, HEADER_H, LCD_WIDTH, LCD_HEIGHT - HEADER_H, T_WALL);
     double xs[STATS_MAX], ys[STATS_MAX];
     stats1_t s;
     int n = collect_x(xs);
-    if (!stats1(xs, n, &s)) {
-        display_str(4, HEADER_H + 10, TR("Nog geen gegevens.", "No data yet."), WHITE, C_BG);
-        footer("", YELLOW);
-        return;
-    }
-    stat_line(0, 0, "n", s.n);
-    stat_line(0, 1, TR("som", "sum"), s.sum);
-    stat_line(0, 2, TR("gem.", "mean"), s.mean);
-    stat_line(0, 3, TR("mediaan", "median"), s.median);
-    stat_line(0, 4, "Q1", s.q1);
-    stat_line(0, 5, "Q3", s.q3);
-    stat_line(0, 6, "min", s.min);
-    stat_line(0, 7, "max", s.max);
-    stat_line(0, 8, TR("bereik", "range"), s.range);
-    stat_line(0, 9, TR("sd pop", "sd pop"), s.sd_pop);
-    stat_line(0, 10, TR("sd stp", "sd smp"), s.sd_sample);
+    if (!stats1(xs, n, &s)) { no_data(); return; }
+    stat_cell(0, 0, "n", s.n, true);
+    stat_cell(0, 1, TR("som", "sum"), s.sum, false);
+    stat_cell(0, 2, TR("gem.", "mean"), s.mean, false);
+    stat_cell(0, 3, TR("mediaan", "median"), s.median, false);
+    stat_cell(0, 4, "Q1", s.q1, false);
+    stat_cell(0, 5, "Q3", s.q3, false);
+    stat_cell(0, 6, "min", s.min, false);
+    stat_cell(0, 7, "max", s.max, false);
+    stat_cell(0, 8, TR("bereik", "range"), s.range, false);
+    stat_cell(0, 9, TR("sd pop", "sd pop"), s.sd_pop, false);
+    stat_cell(0, 10, TR("sd stp", "sd smp"), s.sd_sample, false);
+    stat_frame(0, 11);
     int np = collect_pairs(xs, ys);
     linreg_t lr;
+    int16_t rx = LCD_WIDTH - 4 - ST_W;
     if (stats_linreg(xs, ys, np, &lr)) {
-        display_str(164, HEADER_H + 6, TR("Regressie (X,Y)", "Regression (X,Y)"), YELLOW, C_BG);
-        display_str(164, HEADER_H + 21, "y = ax + b", C_TEXT, C_BG);
-        stat_line(1, 2, "a", lr.a);
-        stat_line(1, 3, "b", lr.b);
-        stat_line(1, 4, "r", lr.r);
-        stat_line(1, 5, "r^2", lr.r2);
-        stat_line(1, 6, TR("paren", "pairs"), np);
+        display_fill_rect(rx, ST_Y, ST_W, ST_RH * 2, T_GRAY_WHITE);
+        display_fill_rect(rx, ST_Y, ST_W, 2, SERIES);
+        ui_text_center((int16_t)(rx + ST_W / 2), ST_Y + 3, TR("Regressie", "Regression"), &font_small, T_TEXT,
+                       T_GRAY_WHITE);
+        ui_text_center((int16_t)(rx + ST_W / 2), ST_Y + 3 + ST_RH, "y = ax + b", &font_small, T_GRAY_VDARK,
+                       T_GRAY_WHITE);
+        stat_cell(1, 2, "a", lr.a, false);
+        stat_cell(1, 3, "b", lr.b, false);
+        stat_cell(1, 4, "r", lr.r, false);
+        stat_cell(1, 5, "r^2", lr.r2, false);
+        stat_cell(1, 6, TR("paren", "pairs"), np, true);
+        display_rect((int16_t)(rx - 1), ST_Y - 1, ST_W + 2, ST_RH * 7 + 2, T_GRAY_MIDDLE);
+        display_vline((int16_t)(rx + ST_LW), ST_Y + 2 * ST_RH, ST_RH * 5, T_GRAY_BRIGHT);
     } else {
-        display_str(164, HEADER_H + 6, TR("Vul X en Y in", "Fill in X and Y"), GREY, C_BG);
-        display_str(164, HEADER_H + 21, TR("voor regressie", "for regression"), GREY, C_BG);
+        ui_text_center((int16_t)(rx + ST_W / 2), ST_Y + 4, TR("Vul X en Y in", "Fill in X and Y"), &font_small,
+                       T_GRAY_VDARK, T_WALL);
+        ui_text_center((int16_t)(rx + ST_W / 2), ST_Y + 4 + ST_RH, TR("voor regressie", "for regression"),
+                       &font_small, T_GRAY_VDARK, T_WALL);
     }
-    footer(TR("L/R:Tabbladen  HOME:Terug", "L/R:Tabs  HOME:Back"), YELLOW);
 }
 
 #define PX0 30
 #define PX1 (LCD_WIDTH - 10)
 #define PY0 (HEADER_H + 8)
-#define PY1 (LCD_HEIGHT - 28)
+#define PY1 (LCD_HEIGHT - FOOTER_H - 20)
 
 static void draw_scatter(const double *xs, const double *ys, int n, const linreg_t *lr) {
     stats1_t sx, sy;
@@ -248,21 +290,25 @@ static void draw_scatter(const double *xs, const double *ys, int n, const linreg
     x0 -= mx; x1 += mx; y0 -= my; y1 += my;
     #define SX(v) (PX0 + (int)lround(((v) - x0) / (x1 - x0) * (PX1 - PX0)))
     #define SY(v) (PY1 - (int)lround(((v) - y0) / (y1 - y0) * (PY1 - PY0)))
-    display_rect(PX0, PY0, PX1 - PX0 + 1, PY1 - PY0 + 1, RGB(70,70,100));
-    if (x0 < 0 && x1 > 0) display_vline(SX(0.0), PY0, PY1 - PY0, RGB(60,60,80));
-    if (y0 < 0 && y1 > 0) display_hline(PX0, SY(0.0), PX1 - PX0, RGB(60,60,80));
+    display_rect(PX0, PY0, PX1 - PX0 + 1, PY1 - PY0 + 1, T_GRAY_MIDDLE);
+    if (x0 < 0 && x1 > 0) display_vline(SX(0.0), PY0, PY1 - PY0, T_GRAY_DARKEST);
+    if (y0 < 0 && y1 > 0) display_hline(PX0, SY(0.0), PX1 - PX0, T_GRAY_DARKEST);
     if (lr) {                                       /* the line, clipped to the box */
         for (int px = PX0; px <= PX1; px++) {
             double wx = x0 + (double)(px - PX0) / (PX1 - PX0) * (x1 - x0);
             int py = SY(lr->a * wx + lr->b);
-            if (py >= PY0 && py <= PY1) display_pixel(px, py, RGB(255,160,40));
+            if (py >= PY0 && py <= PY1) display_fill_rect(px, py, 1, 2, T_BLUE);
         }
     }
-    for (int i = 0; i < n; i++) display_fill_rect(SX(xs[i]) - 1, SY(ys[i]) - 1, 3, 3, RGB(80,200,255));
+    for (int i = 0; i < n; i++) {                   /* a small round dot */
+        int cx = SX(xs[i]), cy = SY(ys[i]);
+        display_fill_rect(cx - 1, cy - 2, 3, 5, SERIES);
+        display_fill_rect(cx - 2, cy - 1, 5, 3, SERIES);
+    }
     char t[48], a[16], b[16];
     fmt(a, sizeof a, x0 + mx); fmt(b, sizeof b, x1 - mx);
     snprintf(t, sizeof t, "x: %s .. %s", a, b);
-    display_str(PX0, PY1 + 4, t, GREY, C_BG);
+    display_text(PX0, PY1 + 4, t, &font_small, T_GRAY_VDARK, WHITE);
     #undef SX
     #undef SY
 }
@@ -277,13 +323,13 @@ static void draw_box_hist(const double *xs, int n) {
     #define SX(v) (PX0 + (int)lround(((v) - x0) / (x1 - x0) * (PX1 - PX0)))
     /* Box plot */
     int by = PY0 + 4, bh = 24, mid = by + bh / 2;
-    uint16_t c = RGB(80,200,255);
-    display_hline(SX(s.min), mid, SX(s.q1) - SX(s.min), c);
-    display_hline(SX(s.q3), mid, SX(s.max) - SX(s.q3), c);
-    display_vline(SX(s.min), by + 6, bh - 12, c);
-    display_vline(SX(s.max), by + 6, bh - 12, c);
-    display_rect(SX(s.q1), by, SX(s.q3) - SX(s.q1) + 1, bh, c);
-    display_vline(SX(s.median), by, bh, RGB(255,160,40));
+    display_hline(SX(s.min), mid, SX(s.q1) - SX(s.min), SERIES);
+    display_hline(SX(s.q3), mid, SX(s.max) - SX(s.q3), SERIES);
+    display_vline(SX(s.min), by + 6, bh - 12, SERIES);
+    display_vline(SX(s.max), by + 6, bh - 12, SERIES);
+    display_fill_rect(SX(s.q1), by, SX(s.q3) - SX(s.q1) + 1, bh, T_RED_LIGHT);
+    display_rect(SX(s.q1), by, SX(s.q3) - SX(s.q1) + 1, bh, SERIES);
+    display_fill_rect(SX(s.median), by, 2, bh, SERIES);
     /* Histogram: Sturges' rule for the number of bins */
     int k = (int)ceil(log2((double)n)) + 1;
     if (k < 1) k = 1;
@@ -301,21 +347,18 @@ static void draw_box_hist(const double *xs, int n) {
         if (w == 0) lo = s.min - 0.5;
         int xa = SX(lo), xb = SX(hi);
         int h = count[b] * (hy1 - hy0) / top;
-        if (h > 0) {
-            display_fill_rect(xa + 1, hy1 - h, xb - xa - 1, h, RGB(60,130,255));
-            display_rect(xa, hy1 - h, xb - xa + 1, h + 1, RGB(140,190,255));
-        }
+        if (h > 0) display_fill_rect(xa + 1, hy1 - h, xb - xa - 1, h, SERIES);
     }
-    display_hline(PX0, hy1, PX1 - PX0, RGB(70,70,100));
+    display_hline(PX0, hy1, PX1 - PX0, T_GRAY_DARKEST);
     char t[64], a[16], b[16];
     fmt(a, sizeof a, s.min); fmt(b, sizeof b, s.max);
     snprintf(t, sizeof t, "min %s  max %s  %s %d", a, b, TR("staven", "bins"), k);
-    display_str(PX0, PY1 + 4, t, GREY, C_BG);
+    display_text(PX0, PY1 + 4, t, &font_small, T_GRAY_VDARK, WHITE);
     #undef SX
 }
 
 static void draw_plot(void) {
-    display_fill_rect(0, HEADER_H, LCD_WIDTH, LCD_HEIGHT - HEADER_H, C_BG);
+    display_fill_rect(0, HEADER_H, LCD_WIDTH, LCD_HEIGHT - HEADER_H, WHITE);
     double xs[STATS_MAX], ys[STATS_MAX];
     linreg_t lr;
     int np = collect_pairs(xs, ys);
@@ -324,21 +367,19 @@ static void draw_plot(void) {
         draw_scatter(xs, ys, np, line ? &lr : NULL);
     } else {
         int n = collect_x(xs);
-        if (n == 0) display_str(4, HEADER_H + 10, TR("Nog geen gegevens.", "No data yet."), WHITE, C_BG);
-        else draw_box_hist(xs, n);
+        if (n == 0) { no_data(); return; }
+        draw_box_hist(xs, n);
     }
-    footer(np >= 1 ? TR("Spreidingsdiagram + regressielijn", "Scatter plot + regression line")
-                   : TR("Boxplot en histogram van X", "Box plot and histogram of X"), YELLOW);
+    footer(np >= 1 ? TR("Spreidingsdiagram en regressielijn", "Scatter plot and regression line")
+                   : TR("Boxplot en histogram van X", "Box plot and histogram of X"), false);
 }
 
 void statistics_redraw(void) {
-    display_fill(C_BG);
     draw_header();
     if (s_tab == TAB_DATA) draw_data();
     else if (s_tab == TAB_STATS) draw_stats();
     else draw_plot();
 }
-
 /* ── Editing ───────────────────────────────────────────────────── */
 static void scroll_to_row(void) {
     if (s_row < s_top) s_top = s_row;
@@ -401,6 +442,7 @@ static void data_key(key_code_t k) {
         }
     } else if (k == KEY_SHIFT) {
         s_shift = !s_shift;
+        draw_header();
         return;
     } else {
         const char *t = expr_key_text(k, s_shift);
@@ -408,7 +450,7 @@ static void data_key(key_code_t k) {
         if (!s_editing) { s_editing = true; s_blen = 0; s_buf[0] = 0; }
         int n = (int)strlen(t);
         if (s_blen + n < (int)sizeof s_buf) { memcpy(s_buf + s_blen, t, (size_t)n + 1); s_blen += n; }
-        s_shift = false;
+        if (s_shift) { s_shift = false; draw_header(); }
     }
     if (s_row > s_rows) s_row = s_rows;
     scroll_to_row();

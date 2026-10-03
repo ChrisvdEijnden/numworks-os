@@ -6,11 +6,11 @@
  * Input: keypad (alpha+shift modes for text entry)
  * Also accepts characters from UART for debug.
  *
- * Screen layout (320×240, 6×8 font, 1px spacing):
- *   40 chars wide
- *   Top bar: header
- *   20 rows of scrolling output (bottom row = line being printed)
- *   Input line "> _" along the bottom edge
+ * Screen layout (320×240, 7×14 font):
+ *   44 chars wide
+ *   Title bar
+ *   13 rows of scrolling output (bottom row = line being printed)
+ *   Input line "> " along the bottom edge
  *
  * Code size target: < 5 KB
  * ================================================================ */
@@ -21,20 +21,21 @@
 #include "../hal/uart.h"
 #include "../hal/font.h"
 #include "../ui/line_input.h"
+#include "../ui/theme.h"
 #include "../include/config.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdarg.h>
 
-#define COLS    40
-#define CHAR_W  (FONT_W + 1)
-#define CHAR_H  (FONT_H + 2)
-#define BAR_H   18
-#define INPUT_H (CHAR_H + 4)
-#define INPUT_Y (LCD_HEIGHT - INPUT_H + 2)          /* text baseline of input */
-#define ROWS    ((LCD_HEIGHT - BAR_H - INPUT_H) / CHAR_H)   /* 20 */
-/* Input characters that fit after the "> " prompt and before the "_" */
-#define INPUT_VISIBLE (((LCD_WIDTH - 2) / CHAR_W) - 3)
+#define CHAR_W  7                                    /* font_small */
+#define LINE_H  14
+#define COLS    ((LCD_WIDTH - 8) / CHAR_W)           /* 44 */
+#define TOP     (UI_TITLE_H + 4)
+#define INPUT_H 24
+#define INPUT_Y (LCD_HEIGHT - INPUT_H)
+#define ROWS    ((INPUT_Y - TOP) / LINE_H)           /* 13 */
+/* Input characters that fit after the "> " prompt and before the cursor */
+#define INPUT_VISIBLE (COLS - 3)
 
 /* Scrollback ring: line n lives in s_lines[n % ROWS] */
 static char  s_lines[ROWS][COLS+1];
@@ -51,8 +52,7 @@ static int   s_hist_head = 0, s_hist_cnt = 0, s_hist_pos = -1;
 
 /* ── Rendering ───────────────────────────────────────────────── */
 static void draw_header(void) {
-    display_fill_rect(0, 0, LCD_WIDTH, BAR_H, BLUE);
-    display_str(4, 4, "NumWorks OS  Shell", WHITE, BLUE);
+    ui_title_bar_mods("Shell", s_shift, s_alpha);
 }
 
 static void draw_output(void) {
@@ -60,38 +60,33 @@ static void draw_output(void) {
     int first = s_nlines - (ROWS - 1);
     for (int r = 0; r < ROWS; r++) {
         int li = first + r;
-        int y  = BAR_H + r * CHAR_H;
-        if (li >= 0) {
-            /* Pad to clear old content */
-            char padded[COLS+1];
-            snprintf(padded, sizeof(padded), "%-*s", COLS, s_lines[li % ROWS]);
-            display_str(0, y, padded, GREEN, BLACK);
-        } else {
-            display_fill_rect(0, y, LCD_WIDTH, CHAR_H, BLACK);
-        }
+        int16_t y = (int16_t)(TOP + r * LINE_H);
+        display_fill_rect(0, y, LCD_WIDTH, LINE_H, WHITE);
+        if (li >= 0) display_text(4, y, s_lines[li % ROWS], &font_small, T_TEXT, WHITE);
     }
 }
 
+/* The line along the bottom: a prompt, the text's tail, the cursor */
+static void draw_prompt(char prompt, const char *text) {
+    display_fill_rect(0, INPUT_Y, LCD_WIDTH, INPUT_H, WHITE);
+    display_hline(0, INPUT_Y, LCD_WIDTH, T_GRAY_MIDDLE);
+    char line[SHELL_LINE_LEN + 4];
+    size_t n = strlen(text);
+    snprintf(line, sizeof(line), "%c %s", prompt, n > INPUT_VISIBLE ? text + n - INPUT_VISIBLE : text);
+    display_text(4, INPUT_Y + 6, line, &font_small, prompt == '?' ? T_BLUE : T_TEXT, WHITE);
+    display_fill_rect((int16_t)(4 + (int)strlen(line) * CHAR_W), INPUT_Y + 5, 1, 16, T_TEXT);
+}
+
 static void draw_input(void) {
-    display_fill_rect(0, INPUT_Y - 2, LCD_WIDTH, INPUT_H, DKGREY);
-    char prompt[SHELL_LINE_LEN + 4];
-    char mode = s_alpha ? (s_shift ? 'A' : 'a') : (s_shift ? '^' : '>');
-    /* Long input scrolls: show its tail so the cursor stays on screen */
-    const char *tail = s_input;
-    if (s_inlen > INPUT_VISIBLE) tail += s_inlen - INPUT_VISIBLE;
-    snprintf(prompt, sizeof(prompt), "%c %s_", mode, tail);
-    display_str(2, INPUT_Y, prompt, YELLOW, DKGREY);
+    draw_header();
+    draw_prompt('>', s_input);
 }
 
 /* For Python's input(): the line being typed, after a "?" */
 static void draw_read_line(const char *text, bool shift, bool alpha) {
+    ui_title_bar_mods("Shell", shift, alpha);
     draw_output();
-    display_fill_rect(0, INPUT_Y - 2, LCD_WIDTH, INPUT_H, DKGREY);
-    char line[SHELL_LINE_LEN + 4];
-    size_t n = strlen(text);
-    const char *tail = n > INPUT_VISIBLE ? text + n - INPUT_VISIBLE : text;
-    snprintf(line, sizeof(line), "%c %s_", alpha ? (shift ? 'A' : 'a') : (shift ? '^' : '?'), tail);
-    display_str(2, INPUT_Y, line, CYAN, DKGREY);
+    draw_prompt('?', text);
 }
 
 bool shell_read_line(char *buf, int max) {
@@ -109,8 +104,7 @@ void shell_show(void) {
 }
 
 void shell_redraw(void) {
-    display_fill(BLACK);
-    draw_header();
+    ui_body(WHITE);
     draw_output();
     draw_input();
     s_dirty = false;

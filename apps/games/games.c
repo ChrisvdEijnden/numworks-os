@@ -10,39 +10,34 @@
 #include "../../hal/keyboard.h"
 #include "../../include/config.h"
 #include "../../ui/lang.h"
+#include "../../ui/theme.h"
 #include "../settings/prefs.h"
 #include <stdio.h>
 
-#define C_BG  RGB(10,10,20)
-#define C_HDR RGB(30,80,200)
+#define ROW_Y  (UI_TITLE_H + 12)
+#define ROW_H  48
 
 static const struct { const char *name; app_state_t app; best_t best; uint16_t colour; } GAMES[] = {
-    { "Tetris", APP_TETRIS, BEST_TETRIS, RGB(255,60,60)  },
-    { "Snake",  APP_SNAKE,  BEST_SNAKE,  RGB(80,220,80)  },
-    { "2048",   APP_2048,   BEST_2048,   RGB(240,190,60) },
+    { "Tetris", APP_TETRIS, BEST_TETRIS, T_RED    },
+    { "Snake",  APP_SNAKE,  BEST_SNAKE,  T_GREEN  },
+    { "2048",   APP_2048,   BEST_2048,   T_YELLOW },
 };
 #define N_GAMES (int)(sizeof(GAMES) / sizeof(GAMES[0]))
 
 static int s_sel;
 
 void games_redraw(void) {
-    display_fill(C_BG);
-    display_fill_rect(0, 0, LCD_WIDTH, 28, C_HDR);
-    display_str(8, 8, TR("Spellen", "Games"), WHITE, C_HDR);
-    display_str(LCD_WIDTH - 84, 8, TR("HOME:Terug", "HOME:Back"), RGB(200,200,220), C_HDR);
+    ui_title_bar(TR("Spellen", "Games"));
+    ui_body(T_WALL);
     for (int i = 0; i < N_GAMES; i++) {
-        int y = 44 + i * 52;
-        bool sel = i == s_sel;
-        uint16_t bg = sel ? RGB(60,130,255) : RGB(35,35,55);
-        display_fill_rect(16, y, LCD_WIDTH - 32, 44, bg);
-        display_rect(16, y, LCD_WIDTH - 32, 44, sel ? RGB(140,200,255) : RGB(70,70,110));
-        display_fill_rect(28, y + 16, 12, 12, GAMES[i].colour);
-        display_str(52, y + 10, GAMES[i].name, WHITE, bg);
+        int16_t y = (int16_t)(ROW_Y + i * ROW_H), x = UI_MARGIN, w = LCD_WIDTH - 2 * UI_MARGIN;
         char b[32];
         snprintf(b, sizeof b, TR("Record: %lu", "Best: %lu"), (unsigned long)g_prefs.best[GAMES[i].best]);
-        display_str(52, y + 26, b, sel ? WHITE : GREY, bg);
+        ui_row2(x, y, w, ROW_H + 1, GAMES[i].name, b, NULL, i == s_sel);
+        display_fill_rect((int16_t)(x + w - 26), (int16_t)(y + ROW_H / 2 - 6), 12, 12, GAMES[i].colour);
     }
-    display_str(8, LCD_HEIGHT - 14, TR("UP/DOWN:Kies  OK:Spelen", "UP/DOWN:Select  OK:Play"), YELLOW, C_BG);
+    ui_text_center(LCD_WIDTH / 2, LCD_HEIGHT - 22, TR("OK: spelen", "OK: play"), &font_small, T_GRAY_VDARK,
+                   T_WALL);
 }
 
 void games_init(void) { s_sel = 0; }

@@ -1,102 +1,98 @@
 /* ================================================================
- * NumWorks OS — Home Screen (3x4 Icon Grid)
+ * NumWorks OS — Home Screen
  * File: apps/home/home.c
  *
- * Icons row by row:
- *   Rekenmachine | Functies  | Vergelijkingen
- *   Statistiek   | Python    | Bestanden
- *   Editor       | Shell     | Spellen
- *   Docs         | Instellingen | [spare]
+ * The apps as icons, three to a row, two rows on screen at a time; the
+ * arrows move through them, OK or EXE opens one.
  * ================================================================ */
 #include "home.h"
 #include "../../ui/lang.h"
-#include "../../hal/battery.h"
-#include "../../ui/battery_icon.h"
+#include "../../ui/theme.h"
+#include "../../ui/icons.h"
 #include "../../hal/display.h"
 #include "../../hal/keyboard.h"
 #include "../../include/config.h"
-#include <stdio.h>
 
-#define C_BG     RGB(18,18,30)
-#define C_HDR    RGB(30,80,200)
-#define C_ICON   RGB(35,35,55)
-#define C_SEL    RGB(60,130,255)
-#define C_BD     RGB(70,70,110)
-#define C_SBD    RGB(140,200,255)
-#define C_LBL    RGB(220,220,255)
+/* Three columns of 104 x 104 cells, two rows on screen at a time */
+#define COLS     3
+#define CELL     104
+#define LEFT     4
+#define TOP      (UI_TITLE_H + 4)
+#define ROWS_SHOWN 2
 
-#define HEADER_H 28
-#define PAD       4
-#define IW       (LCD_WIDTH  / HOME_COLS)
-#define IH       ((LCD_HEIGHT - HEADER_H) / HOME_ROWS)
-#define GRID_SZ  (HOME_COLS * HOME_ROWS)
-#define N_REAL   11    /* apps; the remaining slot is empty */
-
-typedef struct { const char *nl, *en; app_state_t app; uint16_t dot; } item_t;
-static const item_t ITEMS[GRID_SZ] = {
-    {"Rekenmachine", "Calculator",   APP_CALCULATOR,   RGB(0,200,150)  },
-    {"Functies",     "Functions",    APP_FUNCTIONS,    RGB(80,180,255) },
-    {"Vergelijking", "Equations",    APP_EQUATIONS,    RGB(255,160,60) },
-    {"Statistiek",   "Statistics",   APP_STATISTICS,   RGB(80,220,200) },
-    {"Python",       "Python",       APP_PYTHON,       RGB(255,200,0)  },
-    {"Bestanden",    "Files",        APP_FILEMANAGER,  RGB(100,220,80) },
-    {"Editor",       "Editor",       APP_TEXT_EDITOR,  RGB(240,240,140)},
-    {"Shell",        "Shell",        APP_SHELL,        RGB(200,80,200) },
-    {"Spellen",      "Games",        APP_GAMES,        RGB(255,60,60)  },
-    {"Docs",         "Help",         APP_DOCS,         RGB(120,120,220)},
-    {"Instellingen", "Settings",     APP_SETTINGS,     RGB(180,180,180)},
-    {"",             "",             APP_COUNT,        C_ICON          },
+typedef struct { const char *nl, *en; app_state_t app; const icon_t *icon; } item_t;
+static const item_t ITEMS[] = {
+    {"Rekenmachine", "Calculation",  APP_CALCULATOR,  &icon_calculation},
+    {"Functies",     "Functions",    APP_FUNCTIONS,   &icon_functions},
+    {"Vergelijking", "Equations",    APP_EQUATIONS,   &icon_equations},
+    {"Statistiek",   "Statistics",   APP_STATISTICS,  &icon_statistics},
+    {"Python",       "Python",       APP_PYTHON,      &icon_python},
+    {"Bestanden",    "Files",        APP_FILEMANAGER, &icon_files},
+    {"Editor",       "Editor",       APP_TEXT_EDITOR, &icon_editor},
+    {"Shell",        "Shell",        APP_SHELL,       &icon_shell},
+    {"Spellen",      "Games",        APP_GAMES,       &icon_games},
+    {"Help",         "Help",         APP_DOCS,        &icon_help},
+    {"Instellingen", "Settings",     APP_SETTINGS,    &icon_settings},
 };
+#define N_ITEMS ((int)(sizeof(ITEMS) / sizeof(ITEMS[0])))
+#define N_ROWS  ((N_ITEMS + COLS - 1) / COLS)
 
-static int s_cur = 0;
+static int s_cur = 0;       /* selected app */
+static int s_top = 0;       /* first row on screen */
 
-static void draw_icon(int i) {
-    bool sel = (i == s_cur);
-    int ox = (i % HOME_COLS) * IW;
-    int oy = HEADER_H + (i / HOME_COLS) * IH;
-    uint16_t bg  = sel ? C_SEL  : C_ICON;
-    uint16_t bd  = sel ? C_SBD  : C_BD;
-    uint16_t fg  = sel ? WHITE  : C_LBL;
-    display_fill_rect(ox+PAD, oy+PAD, IW-2*PAD, IH-2*PAD, bg);
-    display_rect     (ox+PAD, oy+PAD, IW-2*PAD, IH-2*PAD, bd);
-    if (i >= N_REAL) return;
-    display_fill_rect(ox + IW/2 - 5, oy + PAD + 6, 11, 11, ITEMS[i].dot);
-    display_str(ox+PAD+3, oy+IH-14, TR(ITEMS[i].nl, ITEMS[i].en), fg, bg);
+static void draw_cell(int i) {
+    int row = i / COLS - s_top;
+    if (row < 0 || row >= ROWS_SHOWN) return;
+    int16_t x = (int16_t)(LEFT + (i % COLS) * CELL), y = (int16_t)(TOP + row * CELL);
+    display_fill_rect(x, y, CELL, CELL, WHITE);
+    if (i >= N_ITEMS) return;
+    ui_icon(ITEMS[i].icon, (int16_t)(x + (CELL - ICON_W) / 2), (int16_t)(y + 12));
+    const char *name = TR(ITEMS[i].nl, ITEMS[i].en);
+    int16_t w = (int16_t)display_text_width(name, &font_small);
+    int16_t tx = (int16_t)(x + (CELL - w) / 2), ty = (int16_t)(y + ICON_H + 20);
+    bool sel = i == s_cur;
+    if (sel) display_fill_rect((int16_t)(tx - 4), (int16_t)(ty - 1), (int16_t)(w + 8), 16, T_YELLOW);
+    display_text(tx, ty, name, &font_small, sel ? WHITE : T_TEXT, sel ? T_YELLOW : WHITE);
 }
 
-/* Battery symbol, and a warning when it's nearly empty */
-void home_draw_status(void) {
-    bool empty = battery_level() == BAT_EMPTY && !battery_usb_powered();
-    display_fill_rect(110, 0, LCD_WIDTH - 110, HEADER_H, C_HDR);
-    if (empty) display_str(110, 8, TR("Batterij bijna leeg", "Battery nearly empty"), RED, C_HDR);
-    else       display_str(LCD_WIDTH - 112, 8, "EXE:Open", RGB(200,220,255), C_HDR);
-    battery_icon_draw(LCD_WIDTH - 8 - BATTERY_ICON_W, 8, C_HDR);
+static void draw_grid(void) {
+    for (int r = 0; r < ROWS_SHOWN; r++)
+        for (int c = 0; c < COLS; c++) draw_cell((s_top + r) * COLS + c);
+    ui_scrollbar(LCD_WIDTH - 5, TOP + 6, ROWS_SHOWN * CELL - 12, s_top, ROWS_SHOWN, N_ROWS);
 }
+
+/* The title bar's battery, every few seconds */
+void home_draw_status(void) { ui_title_battery(); }
 
 void home_redraw(void) {
-    display_fill(C_BG);
-    display_fill_rect(0, 0, LCD_WIDTH, HEADER_H, C_HDR);
-    display_str(10, 8, "NumWorks OS", WHITE, C_HDR);
-    home_draw_status();
-    for (int i = 0; i < GRID_SZ; i++) draw_icon(i);
+    ui_title_bar(TR("Applicaties", "Applications"));
+    ui_body(WHITE);
+    draw_grid();
 }
 
-void home_init(void) { s_cur = 0; }
+void home_init(void) { s_cur = 0; s_top = 0; }
 
 void home_handle_event(const kernel_event_t *ev) {
     if (ev->action != 0) return;
     key_code_t k = (key_code_t)ev->key;
     int prev = s_cur;
 
-    if      (k == KEY_RIGHT && (s_cur % HOME_COLS) < HOME_COLS-1 &&
-             s_cur + 1 < N_REAL)                                  s_cur++;
-    else if (k == KEY_LEFT  && (s_cur % HOME_COLS) > 0)           s_cur--;
-    else if (k == KEY_DOWN  && s_cur + HOME_COLS < N_REAL)        s_cur += HOME_COLS;
-    else if (k == KEY_UP    && s_cur - HOME_COLS >= 0)             s_cur -= HOME_COLS;
+    if      (k == KEY_RIGHT && s_cur + 1 < N_ITEMS)      s_cur++;     /* on to the next row */
+    else if (k == KEY_LEFT  && s_cur > 0)                s_cur--;
+    else if (k == KEY_DOWN  && s_cur + COLS < N_ITEMS)   s_cur += COLS;
+    else if (k == KEY_DOWN  && s_cur / COLS < N_ROWS - 1) s_cur = N_ITEMS - 1;
+    else if (k == KEY_UP    && s_cur - COLS >= 0)        s_cur -= COLS;
     else if (key_is_exe(k)) {
-        if (s_cur < N_REAL && ITEMS[s_cur].app != APP_COUNT)
-            kernel_set_app(ITEMS[s_cur].app);
+        kernel_set_app(ITEMS[s_cur].app);
         return;
     }
-    if (s_cur != prev) { draw_icon(prev); draw_icon(s_cur); }
+    if (s_cur == prev) return;
+    int row = s_cur / COLS;
+    if (row < s_top || row >= s_top + ROWS_SHOWN) {          /* scroll a row */
+        s_top = row < s_top ? row : row - ROWS_SHOWN + 1;
+        draw_grid();
+    } else {
+        draw_cell(prev);
+        draw_cell(s_cur);
+    }
 }

@@ -300,6 +300,57 @@ void display_str(int16_t x, int16_t y, const char *s, uint16_t fg, uint16_t bg) 
     }
 }
 
+/* ── Smoothed text ──────────────────────────────────────────────
+ * Each pixel's coverage (0..15) picks one of 16 colours between the
+ * background and the text colour, worked out once per call. */
+static void blend_table(uint16_t fg, uint16_t bg, uint16_t lut[16]) {
+    int fr = fg >> 11, fgr = (fg >> 5) & 0x3F, fb = fg & 0x1F;
+    int br = bg >> 11, bgr = (bg >> 5) & 0x3F, bb = bg & 0x1F;
+    for (int a = 0; a < 16; a++)
+        lut[a] = (uint16_t)(((br + (fr - br) * a / 15) << 11) |
+                            ((bgr + (fgr - bgr) * a / 15) << 5) |
+                            (bb + (fb - bb) * a / 15));
+}
+
+static void draw_glyph(int16_t x, int16_t y, char ch, const font_t *f, const uint16_t lut[16]) {
+    int16_t cx = x, cy = y, cw = f->w, chh = f->h;
+    if (!clip_mark(&cx, &cy, &cw, &chh)) return;
+    if ((unsigned char)ch < 32 || (unsigned char)ch > 126) ch = '?';
+    int row_bytes = (f->w + 1) / 2;
+    const uint8_t *g = f->data + (ch - 32) * f->h * row_bytes;
+    for (int row = cy - y; row < cy - y + chh; row++) {
+        const uint8_t *r = g + row * row_bytes;
+        uint16_t *p = &FB_PIX(cx, y + row);
+        for (int col = cx - x; col < cx - x + cw; col++) {
+            uint8_t b = r[col >> 1];
+            *p++ = lut[(col & 1) ? (b & 15) : (b >> 4)];
+        }
+    }
+}
+
+void display_text_n(int16_t x, int16_t y, const char *s, int len, const font_t *f,
+                    uint16_t fg, uint16_t bg) {
+    uint16_t lut[16];
+    blend_table(fg, bg, lut);
+    for (int i = 0; i < len && s[i]; i++, x = (int16_t)(x + f->w))
+        draw_glyph(x, y, s[i], f, lut);
+}
+
+void display_text(int16_t x, int16_t y, const char *s, const font_t *f, uint16_t fg, uint16_t bg) {
+    display_text_n(x, y, s, 0x7FFF, f, fg, bg);
+}
+
+int display_text_width(const char *s, const font_t *f) {
+    return (int)strlen(s) * f->w;
+}
+
+void display_image(int16_t x, int16_t y, int16_t w, int16_t h, const uint16_t *px) {
+    int16_t cx = x, cy = y, cw = w, ch = h;
+    if (w <= 0 || h <= 0 || !clip_mark(&cx, &cy, &cw, &ch)) return;
+    for (int16_t row = cy; row < cy + ch; row++)
+        memcpy(&FB_PIX(cx, row), px + (row - y) * w + (cx - x), (size_t)cw * sizeof(uint16_t));
+}
+
 void display_str_len(int16_t x, int16_t y, const char *s, int len,
                      uint16_t fg, uint16_t bg) {
     for (int i = 0; i < len && s[i]; i++) {

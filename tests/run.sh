@@ -29,6 +29,9 @@ SUITES="flashfs qspi expr equations keyboard tetris functions editor scheduler
 skip() { echo "SKIP: $*"; return 77; }
 has() { command -v "$1" > /dev/null 2>&1; }
 gen() { python3 "$T/gen_host.py" "$R" "$B/gen"; }
+# The shared screen parts (title bar, tabs, lists), fonts and icons, for
+# suites that stub the display
+UI="$T/common/ui_host.c ui/theme.c ui/fonts.c ui/icons.c"
 
 # ── Suites: build into $D, then run (the exit status is the result) ─
 t_flashfs() {
@@ -42,27 +45,27 @@ t_expr() {
     $CC $SAN -o "$D/t" "$T/expr/expr_test.c" apps/common/expr.c ui/lang.c -lm && "$D/t"
 }
 t_equations() {
-    $CC $SAN -o "$D/t" "$T/equations/eq_test.c" "$T/equations/eq_wrap.c" apps/common/expr.c ui/lang.c -lm && "$D/t"
+    $CC $SAN -o "$D/t" "$T/equations/eq_test.c" "$T/equations/eq_wrap.c" apps/common/expr.c ui/lang.c $UI -lm && "$D/t"
 }
 t_keyboard() {
     $CC $SAN -o "$D/t" "$T/keyboard/kbd_test.c" "$T/keyboard/kbd_wrap.c" && "$D/t"
 }
 t_tetris() {
-    $CC $SAN -o "$D/t" "$T/tetris/tet_test.c" "$T/tetris/tet_wrap.c" ui/lang.c && "$D/t"
+    $CC $SAN -o "$D/t" "$T/tetris/tet_test.c" "$T/tetris/tet_wrap.c" ui/lang.c $UI && "$D/t"
 }
 t_functions() {
     $CC $SAN -o "$D/t" "$T/functions/fe_test.c" "$T/functions/fe_wrap.c" "$T/functions/ed_wrap.c" \
-        "$T/common/kbonly_wrap.c" apps/common/expr.c apps/common/analysis.c ui/lang.c -lm && "$D/t"
+        "$T/common/kbonly_wrap.c" apps/common/expr.c apps/common/analysis.c ui/lang.c $UI -lm && "$D/t"
 }
 t_editor() {
     $CC $SAN -o "$D/t" "$T/functions/ed2_test.c" "$T/functions/ed_wrap.c" "$T/common/kbonly_wrap.c" \
-        ui/lang.c && "$D/t"
+        ui/lang.c $UI && "$D/t"
 }
 t_scheduler() {
     $CC $SAN -Ikernel -o "$D/t" "$T/scheduler/sched_test.c" kernel/scheduler.c && "$D/t"
 }
 t_shell() {
-    $CC $SAN -o "$D/t" "$T/shell/shell_test.c" shell/shell.c ui/lang.c && "$D/t"
+    $CC $SAN -o "$D/t" "$T/shell/shell_test.c" shell/shell.c ui/lang.c $UI && "$D/t"
 }
 t_crash() {
     gen && $CC $SAN -std=gnu11 -I"$B/gen" -o "$D/t" "$T/crash/crash_test.c" ui/lang.c && "$D/t"
@@ -71,7 +74,7 @@ t_sleep() {
     gen && $CC $SAN -I"$R" -o "$D/t" "$T/sleep/sleep_test.c" "$B/gen/kernel_host.c" "$T/sleep/stubs.c" && "$D/t"
 }
 t_display() {
-    gen && $CC $SAN -I"$T/display" -o "$D/t" "$T/display/lcd_test.c" "$B/gen/display_host.c" ui/font.c && "$D/t"
+    gen && $CC $SAN -I"$T/display" -o "$D/t" "$T/display/lcd_test.c" "$B/gen/display_host.c" ui/font.c ui/fonts.c && "$D/t"
 }
 t_hal() {
     gen && $CC $SAN -I"$T/hal" -o "$D/t" "$T/hal/hw_test.c" \
@@ -85,7 +88,7 @@ t_apps() {
     $CC $SAN -o "$D/t" "$T/apps/apps_test.c" apps/calculator/calculator.c apps/statistics/statistics.c \
         apps/common/stats.c apps/common/expr.c apps/games/snake.c apps/games/g2048.c apps/games/games.c \
         apps/settings/prefs.c apps/settings/settings.c ui/lang.c fs/flashfs.c "$T/common/storage_sim.c" \
-        "$T/common/kbonly_wrap.c" -lm && "$D/t"
+        "$T/common/kbonly_wrap.c" $UI -lm && "$D/t"
 }
 t_python() {
     local E=micropython-port/micropython_embed
@@ -123,7 +126,7 @@ t_python() {
     $CC $SAN -Dkeyboard_poll=kb_real_poll -Dkeyboard_raw_any=kb_real_raw_any \
         -Dkeyboard_is_pressed=kb_real_is_pressed -c "$T/python/kb_host.c" -o "$D/kb_host.o" &&
     $CC $CF -o "$D/t" "${objs[@]}" "$D/kb_host.o" "$T/python/py_test.c" "$T/python/pa_wrap.c" \
-        "$T/python/stubs2.c" ui/line_input.c ui/lang.c fs/flashfs.c "$T/common/storage_sim.c" -lm &&
+        "$T/python/stubs2.c" ui/line_input.c ui/lang.c fs/flashfs.c "$T/common/storage_sim.c" $UI -lm &&
     "$D/t"
 }
 t_transfer() {

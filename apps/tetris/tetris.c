@@ -4,11 +4,13 @@
  * File: apps/tetris/tetris.c
  *
  * Classic Tetris: 10×20 board, 7 tetrominoes, line clear scoring.
- * Board origin: x=60, y=20  (10*10=100 wide, 20*10=200 tall)
+ * Board origin: x=60, y=20 (below the title bar), 10*10=100 wide,
+ * 20*10=200 tall
  * ================================================================ */
 #include "tetris.h"
 #include "../../ui/lang.h"
 #include "../settings/prefs.h"
+#include "../../ui/theme.h"
 #include "../../hal/display.h"
 #include "../../hal/keyboard.h"
 #include "../../hal/hal.h"
@@ -20,21 +22,21 @@
 #define BH    TETRIS_BOARD_H
 #define CS    TETRIS_CELL_SZ   /* 10 px */
 #define OX    60               /* board left pixel */
-#define OY    20               /* board top pixel */
+#define OY    (UI_TITLE_H + 2) /* board top pixel */
 
-#define C_BG  RGB(10,10,20)
-#define C_BD  RGB(60,60,80)
+#define C_BG  T_WALL           /* the empty board */
+#define C_BD  T_GRAY_MIDDLE
 
 /* Piece colours */
 static const uint16_t PCOL[8] = {
-    BLACK,
-    RGB(0,220,220),   /* I */
-    RGB(0,60,220),    /* J */
-    RGB(220,140,0),   /* L */
-    RGB(220,220,0),   /* O */
-    RGB(0,200,60),    /* S */
-    RGB(160,0,220),   /* T */
-    RGB(220,0,0),     /* Z */
+    T_WALL,
+    T_TURQUOISE,              /* I */
+    T_BLUE,                   /* J */
+    T_ORANGE,                 /* L */
+    T_YELLOW,                 /* O */
+    T_GREEN,                  /* S */
+    T_MAGENTA,                /* T */
+    T_RED,                    /* Z */
 };
 
 /* Piece rotations: 4 shapes × 4 rotations × 4 cells (dx,dy) */
@@ -68,8 +70,8 @@ static void draw_cell(int bx, int by, uint16_t col) {
         display_fill_rect(px, py, CS, CS, C_BG);
         return;
     }
-    display_fill_rect(px+1, py+1, CS-2, CS-2, col);
-    display_rect(px, py, CS, CS, RGB(200,200,200));
+    display_fill_rect(px, py, CS, CS, col);
+    display_rect(px, py, CS, CS, WHITE);
 }
 
 static bool piece_fits(int px, int py, int t, int r) {
@@ -130,31 +132,33 @@ static void draw_piece(uint16_t col) {
     }
 }
 
+/* Score, record, lines and level beside the board; the keys below */
 static void draw_sidebar(void) {
-    int sx = OX + BW*CS + 8;
-    display_fill_rect(sx, OY, LCD_WIDTH-sx-2, 190, C_BG);
+    int16_t sx = OX + BW*CS + 12, y = OY;
+    display_fill_rect(sx, OY, LCD_WIDTH - sx, LCD_HEIGHT - OY, WHITE);
     char buf[32];
-    display_str(sx, OY,      "Score", YELLOW, C_BG);
-    snprintf(buf, sizeof(buf), "%d", s_score); display_str(sx, OY+12, buf, WHITE, C_BG);
-    display_str(sx, OY+28,   TR("Record", "Best"), YELLOW, C_BG);
-    snprintf(buf, sizeof(buf), "%lu", (unsigned long)g_prefs.best[BEST_TETRIS]);
-    display_str(sx, OY+40, buf, WHITE, C_BG);
-    display_str(sx, OY+56,   TR("Lijnen", "Lines"), YELLOW, C_BG);
-    snprintf(buf, sizeof(buf), "%d", s_lines); display_str(sx, OY+68, buf, WHITE, C_BG);
-    display_str(sx, OY+84,   "Level", YELLOW, C_BG);
-    snprintf(buf, sizeof(buf), "%d", s_level); display_str(sx, OY+96, buf, WHITE, C_BG);
-    display_str(sx, OY+120, TR("L/R:Beweeg", "L/R:Move"), RGB(160,160,160), C_BG);
-    display_str(sx, OY+132, TR("UP:Draai", "UP:Rotate"), RGB(160,160,160), C_BG);
-    display_str(sx, OY+144, TR("DOWN:Snel", "DOWN:Drop"), RGB(160,160,160), C_BG);
-    display_str(sx, OY+156, TR("BACK:Spellen", "BACK:Games"), RGB(160,160,160), C_BG);
+    const char *labels[4] = { "Score", TR("Record", "Best"), TR("Lijnen", "Lines"), "Level" };
+    long values[4] = { s_score, (long)g_prefs.best[BEST_TETRIS], s_lines, s_level };
+    for (int i = 0; i < 4; i++, y = (int16_t)(y + 38)) {
+        display_text(sx, y, labels[i], &font_small, T_GRAY_VDARK, WHITE);
+        snprintf(buf, sizeof(buf), "%ld", values[i]);
+        display_text(sx, (int16_t)(y + 14), buf, &font_large, T_TEXT, WHITE);
+    }
+    const char *keys[4] = { TR("L/R: beweeg", "L/R: move"), TR("UP: draai", "UP: rotate"),
+                            TR("DOWN: snel", "DOWN: drop"), TR("BACK: spellen", "BACK: games") };
+    for (int i = 0; i < 4; i++)
+        display_text(sx, (int16_t)(y + 4 + i * 14), keys[i], &font_small, T_GRAY_DARK, WHITE);
 }
 
 static bool s_new_best;   /* this game set the record */
 
 static void draw_game_over(void) {
-    display_fill_rect(40, 100, 240, 40, RGB(200,0,0));
-    display_str(60, 108, TR("GAME OVER  OK:Opnieuw", "GAME OVER  OK:Again"), WHITE, RGB(200,0,0));
-    if (s_new_best) display_str(60, 122, TR("Nieuw record!", "New best score!"), YELLOW, RGB(200,0,0));
+    display_fill_rect(40, 98, 240, 48, WHITE);
+    display_rect(40, 98, 240, 48, T_GRAY_MIDDLE);
+    ui_text_center(LCD_WIDTH / 2, s_new_best ? 106 : 115, TR("GAME OVER  OK:opnieuw", "GAME OVER  OK:again"),
+                   &font_small, T_TEXT, WHITE);
+    if (s_new_best) ui_text_center(LCD_WIDTH / 2, 124, TR("Nieuw record!", "New best score!"), &font_small,
+                                   T_ORANGE, WHITE);
 }
 
 /* The falling piece can't move down: fix it, clear lines, spawn the next */
@@ -168,9 +172,8 @@ static void lock_piece(void) {
 }
 
 void tetris_redraw(void) {
-    display_fill(C_BG);
-    display_fill_rect(0,0,LCD_WIDTH,18, RGB(30,80,200));
-    display_str(6, 4, "Tetris", WHITE, RGB(30,80,200));
+    ui_title_bar("Tetris");
+    ui_body(WHITE);
     /* Board border */
     display_rect(OX-1, OY-1, BW*CS+2, BH*CS+2, C_BD);
     draw_board();

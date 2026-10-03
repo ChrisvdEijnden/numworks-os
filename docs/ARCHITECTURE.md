@@ -225,6 +225,40 @@ Drawing goes into a RAM framebuffer. Every drawing call grows a
 (`CASET`/`RASET`/`RAMWR`), so a blinking cursor costs a few hundred
 pixels rather than 76 800.
 
+## The look
+
+The screens look like NumWorks' own software (Epsilon): a yellow title
+bar with the screen's name in capitals and the battery, light screens,
+lists of white rows with the selected one shaded, purple tab bars, and
+the home screen's grid of app icons with the selected name on yellow.
+The colours and sizes are Epsilon's (its palette, the 18-pixel title
+bar, 27-pixel tabs); the code, the drawings and the icons are this
+OS's own, and nothing carries NumWorks' name or logo.
+
+- `ui/theme.h` has the colours (`T_YELLOW`, `T_PURPLE`, `T_SELECT`,
+  ...) and sizes, and `ui/theme.c` the parts every app shares: the title
+  bar (`ui_title_bar`, with shift/alpha shown in it), tabs, list rows,
+  scroll bars, a message screen, and the icons.
+- Text uses two fonts, 7 × 14 and 10 × 18 pixels, with 16 levels of
+  grey so letters have smooth edges (`display_text()` blends them from
+  the text colour to the background). They are rendered from Source
+  Code Pro (Adobe, SIL Open Font License, `ui/fonts-LICENSE.txt`) by
+  `tools/fontgen.py` into `ui/fonts.c`. The small 5 × 7 font
+  (`display_str()`) stays for the crash screen and Python's `display`
+  and `kandinsky` modules.
+- The home screen's icons (55 × 56) are drawn by `tools/icongen.py`
+  and stored run-length coded in `ui/icons.c`.
+- The editor colours Python files: keywords, numbers, strings,
+  comments and common built-in functions.
+
+Both generated files are in the repository; the scripts need Python
+with Pillow, and the font files, only to change them:
+
+```bash
+python3 tools/fontgen.py SourceCodePro-Medium.ttf > ui/fonts.c
+python3 tools/icongen.py SourceCodePro-Semibold.ttf > ui/icons.c
+```
+
 ## Storage
 
 The file system lives in the last 256 KB of the QSPI flash
@@ -474,8 +508,9 @@ requested from pid.codes before builds are distributed.
 (ADC1 channel 9, 2.8 V reference, 8 samples averaged) and reads the
 RT9526A's CHG output on PE3 (low while charging) and VBUS on PA9. The
 level uses NumWorks' thresholds, 3.62/3.7/3.8 V with 20 mV hysteresis.
-The kernel checks every 2 seconds: the home screen shows a battery
-symbol (with a bolt while charging) and warns when it's nearly empty.
+The kernel checks every 2 seconds. The title bar shows a battery
+symbol (with a bolt while charging, red when nearly empty); the home
+screen keeps it up to date, other screens when they are drawn.
 
 The RGB LED is driven by TIM3 in PWM mode on PB4/PB5/PB0 (high = lit,
 4.8 kHz, at most a quarter duty). With USB power it shows the charge
@@ -508,3 +543,12 @@ thread keeps the window (SDL2). The cut is as low as possible:
 
 A restart (`hal_reset()`) re-executes the simulator; the storage file
 stays.
+
+The window (`sim/sim_window.c`) is drawn in software: a white
+calculator, upright, with the screen (each pixel 2 × 2), the LED above
+it and the N0110's keypad, each key with what SHIFT (orange) and ALPHA
+(grey) make of it in this OS. The picture is 800 × 1600 and the window
+opens at half that or smaller to fit the screen, so on a Retina screen
+every pixel is sharp. The calculator body without pressed keys is drawn
+once; each frame copies it and draws the pressed keys, the screen and
+the LED.

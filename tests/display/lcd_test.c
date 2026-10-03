@@ -85,18 +85,35 @@ int main(void) {
     CHECK(panel_matches() && pixels == 296 * 196, "two far-apart pixels: their bounding box");
     srand(7); int ok = 1; long total = 0;
     for (int i = 0; i < 2000; i++) {
-        int op = rand() % 4; int16_t x = rand() % 400 - 40, y = rand() % 300 - 30, w = rand() % 60, h = rand() % 40;
+        int op = rand() % 6; int16_t x = rand() % 400 - 40, y = rand() % 300 - 30, w = rand() % 60, h = rand() % 40;
         uint16_t c = rand();
         if (op == 0) display_fill_rect(x, y, w, h, c);
         if (op == 1) display_pixel(x, y, c);
         if (op == 2) display_char(x, y, 'A' + rand() % 26, c, ~c);
         if (op == 3) display_rect(x, y, w, h, c);
+        if (op == 4) display_text(x, y, "Ab1", rand() % 2 ? &font_small : &font_large, c, ~c);
+        if (op == 5) { static uint16_t img[40 * 60]; for (int k = 0; k < 40 * 60; k++) img[k] = (uint16_t)(c + k);
+                       display_image(x, y, w ? w : 1, h ? h : 1, img); }
         if (rand() % 3 == 0) { pixels = 0; display_flush(); total += pixels; if (!panel_matches()) ok = 0; }
     }
     display_flush();
     CHECK(ok && panel_matches(), "2000 random draws (partly off screen): LCD always equals the framebuffer");
     CHECK(bad_window == 0, "every window within 320x240");
     printf("       (%ld pixels sent; a full flush each time would have sent ~%ld)\n", total, 667L * 76800);
+
+    puts("text in the smooth fonts:");
+    display_fill_rect(0, 0, 40, 30, 0xFFFF);
+    display_text(2, 2, "W", &font_large, 0x0000, 0xFFFF);
+    int black = 0, grey = 0, white = 0;
+    for (int y = 2; y < 2 + font_large.h; y++) for (int x = 2; x < 2 + font_large.w; x++) {
+        uint16_t p = FB_PIX(x, y);
+        if (p == 0x0000) black++; else if (p == 0xFFFF) white++; else grey++;
+    }
+    CHECK(black > 10 && grey > 4 && white > 50, "a glyph: solid inside, blended at its edges, background around it");
+    CHECK(FB_PIX(2 + font_large.w, 2) == 0xFFFF && FB_PIX(1, 2) == 0xFFFF, "nothing drawn outside its cell");
+    CHECK(display_text_width("abc", &font_small) == 3 * font_small.w, "width: characters times the cell width");
+    pixels = 0; display_text(316, 236, "clip", &font_small, 0, 0xFFFF); display_flush();
+    CHECK(panel_matches() && bad_window == 0, "text at the corner is clipped");
 
     puts("sleep:");
     seq[0] = 0;

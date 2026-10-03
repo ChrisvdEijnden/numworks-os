@@ -4,11 +4,13 @@
 #include <stdint.h>
 #include "sim.h"
 
-#define SIM_WIN_W 1064
-#define SIM_WIN_H 620
+/* The picture is drawn at twice the size the window opens at (sharp
+ * on a Retina screen); the window scales it */
+#define SIM_WIN_W 800
+#define SIM_WIN_H 1600
 
 /* Draws the whole window into fb (SIM_WIN_W × SIM_WIN_H, 0xRRGGBB) */
-void       sim_window_draw(uint32_t *fb, const char *status);
+void       sim_window_draw(uint32_t *fb);
 key_code_t sim_window_key_at(int x, int y);
 
 /* The screen alone, as it looks with the backlight */

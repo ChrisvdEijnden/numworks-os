@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "../include/config.h"
+#include "font.h"
 
 /* RGB565 colour helpers */
 #define RGB(r,g,b) ((uint16_t)(((r)&0xF8)<<8 | ((g)&0xFC)<<3 | (b)>>3))
@@ -31,6 +32,14 @@ void display_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t colour);
 void display_fill_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t colour);
 void display_char(int16_t x, int16_t y, char c, uint16_t fg, uint16_t bg);
 void display_str(int16_t x, int16_t y, const char *s, uint16_t fg, uint16_t bg);
+/* Smoothed text in one of the fonts in font.h, on one line, its edges
+ * blended into bg */
+void display_text(int16_t x, int16_t y, const char *s, const font_t *f, uint16_t fg, uint16_t bg);
+void display_text_n(int16_t x, int16_t y, const char *s, int len, const font_t *f,
+                    uint16_t fg, uint16_t bg);
+int  display_text_width(const char *s, const font_t *f);
+/* w x h pixels, row by row */
+void display_image(int16_t x, int16_t y, int16_t w, int16_t h, const uint16_t *px);
 void display_str_len(int16_t x, int16_t y, const char *s, int len, uint16_t fg, uint16_t bg);
 
 /* Screen buffer — write here, call display_flush() to push */

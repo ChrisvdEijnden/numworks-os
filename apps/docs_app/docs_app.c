@@ -7,14 +7,14 @@
 #include "../../hal/keyboard.h"
 #include "../../include/config.h"
 #include "../../ui/lang.h"
+#include "../../ui/theme.h"
 #include <string.h>
 #include <stdio.h>
 
-#define C_BG  RGB(10,10,20)
-#define C_HDR RGB(30,80,200)
-#define HEADER_H 24
-#define LINE_H   12
-#define SHOWN    15                 /* lines on screen */
+#define HEADER_H (UI_TITLE_H + UI_TAB_H)
+#define LINE_H   14
+#define TEXT_Y   (HEADER_H + 8)
+#define SHOWN    ((LCD_HEIGHT - TEXT_Y - 4) / LINE_H)    /* lines on screen: 13 */
 #define MAXL     16
 
 typedef struct { const char *title; const char *lines[MAXL]; } page_t;
@@ -180,19 +180,27 @@ static int s_scroll = 0;
 static const page_t *page(void) { return g_lang == LANG_EN ? &EN[s_page] : &NL[s_page]; }
 static int nlines(const page_t *p) { int n = 0; while (n < MAXL && p->lines[n]) n++; return n; }
 
+/* The page's name on a purple bar, with arrows to the pages beside it */
+static void draw_page_bar(const page_t *p) {
+    display_fill_rect(0, UI_TITLE_H, LCD_WIDTH, UI_TAB_H, T_PURPLE);
+    int16_t ty = UI_TITLE_H + (UI_TAB_H - 14) / 2;
+    ui_text_center(LCD_WIDTH / 2, ty, p->title, &font_small, WHITE, T_PURPLE);
+    if (s_page > 0) display_text(10, ty, "<", &font_small, WHITE, T_PURPLE);
+    if (s_page < NPAGES - 1) display_text(LCD_WIDTH - 17, ty, ">", &font_small, WHITE, T_PURPLE);
+    char num[24];
+    snprintf(num, sizeof num, "%d/%d", s_page + 1, NPAGES);
+    display_text(26, ty, num, &font_small, T_GRAY_MIDDLE, T_PURPLE);
+}
+
 void docs_redraw(void) {
-    display_fill(C_BG);
-    display_fill_rect(0, 0, LCD_WIDTH, HEADER_H, C_HDR);
     const page_t *p = page();
-    char title[40];
-    snprintf(title, sizeof title, "%s %d/%d  %s %s", s_page > 0 ? "<" : " ", s_page + 1, NPAGES,
-             p->title, s_page < NPAGES - 1 ? ">" : "");
-    display_str(6, 8, title, WHITE, C_HDR);
+    ui_title_bar(TR("Help", "Help"));
+    draw_page_bar(p);
+    display_fill_rect(0, HEADER_H, LCD_WIDTH, LCD_HEIGHT - HEADER_H, WHITE);
     int n = nlines(p);
     for (int i = s_scroll; i < n && i < s_scroll + SHOWN; i++)
-        display_str(8, HEADER_H + 6 + (i - s_scroll) * LINE_H, p->lines[i], RGB(200,230,255), C_BG);
-    display_str(4, LCD_HEIGHT - 12, TR("L/R:Pagina  UP/DN:Scroll  HOME:Terug",
-                                       "L/R:Page  UP/DN:Scroll  HOME:Back"), YELLOW, C_BG);
+        display_text(10, (int16_t)(TEXT_Y + (i - s_scroll) * LINE_H), p->lines[i], &font_small, T_TEXT, WHITE);
+    if (n > SHOWN) ui_scrollbar(LCD_WIDTH - 6, TEXT_Y, SHOWN * LINE_H, s_scroll, SHOWN, n);
 }
 
 void docs_init(void) { s_page = 0; s_scroll = 0; }

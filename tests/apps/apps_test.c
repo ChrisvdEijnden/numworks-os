@@ -17,16 +17,19 @@
 #include "../../apps/games/games.h"
 #include "../../apps/settings/prefs.h"
 #include "../../apps/settings/settings.h"
+#include "../../hal/display.h"
 
 /* ── stubs ── */
-static char shown[64][80]; static int nshown;
-static void log_str(const char *s) { snprintf(shown[nshown % 64], 80, "%s", s); nshown++; }
+#define SHOWN 256
+static char shown[SHOWN][80]; static int nshown;
+static void log_str(const char *s, int n) { snprintf(shown[nshown % SHOWN], 80, "%.*s", n, s); nshown++; }
 static bool was_shown(const char *needle) {
-    for (int i = 0; i < 64 && i < nshown; i++) if (strstr(shown[i], needle)) return true;
+    for (int i = 0; i < SHOWN && i < nshown; i++) if (strstr(shown[i], needle)) return true;
     return false;
 }
 static void clear_shown(void) { nshown = 0; memset(shown, 0, sizeof shown); }
-void display_str(int16_t x, int16_t y, const char *s, uint16_t a, uint16_t b) { (void)x;(void)y;(void)a;(void)b; log_str(s); }
+void display_text_n(int16_t x, int16_t y, const char *s, int n, const font_t *f, uint16_t a, uint16_t b) {
+    (void)x;(void)y;(void)f;(void)a;(void)b; log_str(s, n); }
 void display_fill(uint16_t c) { (void)c; }
 void display_fill_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t c) { (void)x;(void)y;(void)w;(void)h;(void)c; }
 void display_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t c) { (void)x;(void)y;(void)w;(void)h;(void)c; }
@@ -215,7 +218,8 @@ int main(void) {
     key(settings_handle_event, KEY_DOWN); key(settings_handle_event, KEY_RIGHT);     /* language */
     check(g_lang == LANG_EN && led_now == LED_RED && bl_now == 13, "Settings: LED red, brightness 14/16, language English");
     clear_shown(); settings_redraw();
-    check(was_shown("Settings") && was_shown("Language: English") && was_shown("LED:   Red"), "the screen is in English at once");
+    check(was_shown("SETTINGS") && was_shown("Language") && was_shown("English") && was_shown("Red"),
+          "the screen is in English at once");
     key(settings_handle_event, KEY_HOME);
     const char *d; uint32_t sz;
     check(flashfs_map(PREFS_FILE, &d, &sz) && memmem(d, sz, "led=1\n", 6) && memmem(d, sz, "brightness=13\n", 14) &&

@@ -7,6 +7,7 @@
 #include "mp_port.h"
 #include "../../hal/keyboard.h"
 #include "../../kernel/kernel.h"
+#include "../../hal/display.h"
 /* The regions the linker script provides on the calculator: a 48 KB
  * heap like the firmware's, and a stack region (MicroPython runs on the
  * host's own stack, see python_start()). mp_port.c is built with
@@ -39,6 +40,11 @@ void display_str(int16_t x, int16_t y, const char *s, uint16_t fg, uint16_t bg) 
 void display_pixel(int16_t x, int16_t y, uint16_t c) { if (x >= 0 && y >= 0 && x < 320 && y < 240) fb[y][x] = c; }
 void display_fill_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t c) { for (int j = y; j < y + h; j++) for (int i = x; i < x + w; i++) display_pixel(i, j, c); }
 uint16_t display_get_pixel(int16_t x, int16_t y) { return (x >= 0 && y >= 0 && x < 320 && y < 240) ? fb[y][x] : 0; }
+void display_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t c) { (void)x;(void)y;(void)w;(void)h;(void)c; }
+void display_hline(int16_t x, int16_t y, int16_t w, uint16_t c) { display_fill_rect(x, y, w, 1, c); }
+/* the app's own text (the console, the title bar): not looked at here */
+void display_text_n(int16_t x, int16_t y, const char *s, int n, const font_t *f, uint16_t fg, uint16_t bg) {
+    (void)x;(void)y;(void)s;(void)n;(void)f;(void)fg;(void)bg; }
 /* held keys, for ion.keydown() */
 static key_code_t held = KEY_NONE;
 bool keyboard_is_pressed(key_code_t k) { return k == held; }

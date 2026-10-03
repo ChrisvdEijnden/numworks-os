@@ -47,12 +47,12 @@ fails there, its log in `tests/build/logs/` says why.
 | `keyboard` | `hal/keyboard.c` | Pin set-up, scanning, debouncing, key repeat |
 | `tetris` | `apps/tetris/` | Timing and drawing |
 | `functions` | `apps/functions/`, `apps/common/analysis.c` | Function entry, graph, trace, zeros, extremes, intersections |
-| `editor` | `apps/text_editor/` | 8 KB files, scrolling in both directions |
+| `editor` | `apps/text_editor/` | 8 KB files, scrolling in both directions, Python in colour |
 | `scheduler` | `kernel/scheduler.c` | Task order, sleeping, idle |
 | `shell` | `shell/shell.c` | Scrolling output stays on screen |
 | `crash` | `hal/fault.c` | The crash report for each kind of fault, on the UART and the screen |
 | `sleep` | `kernel/kernel.c` | Sleep mode: keys, USB and clocks while asleep |
-| `display` | `hal/display.c` | The ST7789V set-up sequence and what reaches the panel |
+| `display` | `hal/display.c` | The ST7789V set-up sequence and what reaches the panel; text in the smooth fonts |
 | `hal` | `hal/backlight.c`, `led.c`, `battery.c` | Backlight pulses, LED PWM, battery levels and the charge LED |
 | `usb` | `usb/usb_device.c`, `usb_cdc.c` | Enumeration like Linux does it, then the transfer protocol, on a simulated OTG core |
 | `apps` | calculator, statistics, games, settings | History, statistics, Snake, 2048, saved settings, the language switch |
@@ -78,6 +78,12 @@ fails there, its log in `tests/build/logs/` says why.
 - `loader` runs the real ARM binary (`make loader`), plus a build with a
   5 ms busy timeout for the dead-flash case, and the OS image whose
   vector table the loader has to accept.
+
+Suites that stub the display and test an app link the shared screen
+parts with it (`ui/theme.c`, the fonts and icons, and
+`common/ui_host.c`); the test's own `display_text_n()` sees every piece
+of text drawn, and the layout values the checks need come from the app
+through its `*_wrap.c`, so a change of layout doesn't break them.
 
 `common/storage_sim.c` is the storage area as NOR flash in RAM
 (programming only clears bits, erase per sector), with power cuts and

@@ -76,8 +76,8 @@ The C code is compiled against newlib's own headers (`-std=gnu11`);
 ## Simulator
 
 The OS can run in a window on a Mac or a Linux PC: the same code as
-on the calculator, compiled for the PC, with the screen and keypad in a
-window. It needs SDL2 and a C compiler (on a Mac: Xcode's command-line
+on the calculator, compiled for the PC, in a window that looks like a
+white N0110, with its screen and keypad. It needs SDL2 and a C compiler (on a Mac: Xcode's command-line
 tools).
 
 macOS:
@@ -113,7 +113,8 @@ make run-sim
 
 Characters you type press the calculator key that carries them, so
 `7`, `+` and `(` work directly. A letter presses its alpha key (the
-small orange letter on each key), so for text, switch alpha on first,
+small grey letter above each key, on the right; the orange one on the
+left is what SHIFT types), so for text, switch alpha on first,
 as on the calculator: tap Option, type `print`, tap Option again, then
 type `(1+2)`. On a Mac keyboard, F1 and F2 may need fn, and Home and
 End are fn + ← and fn + →.
@@ -124,12 +125,14 @@ asks to format it, like a new calculator. Options, after
 
 - `--storage FILE`: keep the files somewhere else
 - `--fresh`: start with empty storage
-- `--scale 2`: a bigger window (it can also be resized)
+- `--scale F`: the window's size, 1 for the full 800 × 1600 picture
+  (by default it fits the screen; it can also be resized)
 - `--no-usb`: no PC transfer port
 
 **PC transfer.** The simulator opens a pseudo-terminal in place of the
 USB serial port and prints its name at start-up, e.g.
-`usb: PC transfer on /dev/ttys003`. The command-line tools work with
+`usb: PC transfer on /dev/ttys003` (it is in the window's title too).
+The command-line tools work with
 it: `python3 tools/upload.py --port /dev/ttys003 list`. The browser
 uploader can't connect to it: browsers only offer real serial ports.
 
@@ -149,6 +152,8 @@ Steps, separated by `;`: `wait MS`, `key NAME` (`OK`, `EXE`, `HOME`,
 MS`, `type TEXT`, `uart TEXT` (a line for the shell), `shot FILE.bmp`
 (the window), `screen FILE.bmp` (the calculator screen) and `quit`.
 `--headless` runs without a window. `tests/run.sh sim` uses this.
+`shot` saves the whole calculator (800 × 1600), `screen` the 320 × 240
+screen.
 
 **What is simulated.** The display, keyboard and crash-screen drivers
 are the calculator's own; below them, `sim/` stands in for the

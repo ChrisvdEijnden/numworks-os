@@ -10,6 +10,7 @@
 #include "hal/backlight.h"
 #include "hal/battery.h"
 #include "ui/lang.h"
+#include "ui/theme.h"
 #include "apps/settings/prefs.h"
 #include "kernel/kernel.h"
 #include "fs/flashfs.h"
@@ -33,45 +34,44 @@
 #include <string.h>
 
 /* ── Boot splash ──────────────────────────────────────────────── */
+#define BAR_X 60
+#define BAR_W 200
+#define BAR_Y 150
+
 static void boot_splash(uint32_t ms_start) {
-    display_fill(RGB(10,10,20));
-    display_fill_rect(0, 0, LCD_WIDTH, 30, RGB(30,80,200));
-    display_str(10,  8, "NumWorks OS",        WHITE, RGB(30,80,200));
-    display_str(10, 40, TR("Firmware voor de N0110", "Firmware for the N0110"), GREY, RGB(10,10,20));
-    display_str(10, 56, "STM32F730 @ 192 MHz",  GREY, RGB(10,10,20));
-    display_str(10, 72, TR("Opstarten...", "Starting..."), RGB(100,200,255), RGB(10,10,20));
+    display_fill(WHITE);
+    ui_text_center(LCD_WIDTH / 2, 76, "NumWorks OS", &font_large, T_TEXT, WHITE);
+    ui_text_center(LCD_WIDTH / 2, 102, TR("Firmware voor de N0110", "Firmware for the N0110"), &font_small,
+                   T_GRAY_VDARK, WHITE);
+    ui_text_center(LCD_WIDTH / 2, 118, "STM32F730 @ 192 MHz", &font_small, T_GRAY_DARK, WHITE);
 
     /* Progress bar */
-    display_rect(20, 110, 280, 14, RGB(60,60,80));
+    display_fill_rect(BAR_X, BAR_Y, BAR_W, 4, T_GRAY_BRIGHT);
     display_flush();
     uint32_t elapsed;
     int shown = -1;
     do {
         elapsed = hal_tick_ms() - ms_start;
-        int pct = (int)(elapsed * 280 / 1500);
-        if (pct > 280) pct = 280;
-        if (pct != shown) {
-            display_fill_rect(21, 111, pct, 12, RGB(60,130,255));
+        int done = (int)(elapsed * BAR_W / 1500);
+        if (done > BAR_W) done = BAR_W;
+        if (done != shown) {
+            display_fill_rect(BAR_X, BAR_Y, (int16_t)done, 4, T_YELLOW);
             display_flush();
-            shown = pct;
+            shown = done;
         }
     } while (elapsed < 1500);
 
     if (hal_reset_by_watchdog())
-        display_str(10, 124, TR("Herstart na een vastloper (watchdog).",
-                                "Restarted after a hang (watchdog)."), YELLOW, RGB(10,10,20));
-    display_str(10, 140, TR("Klaar!", "Ready!"), RGB(100,255,100), RGB(10,10,20));
+        ui_text_center(LCD_WIDTH / 2, 170, TR("Herstart na een vastloper (watchdog).",
+                                              "Restarted after a hang (watchdog)."), &font_small, T_ORANGE, WHITE);
+    ui_text_center(LCD_WIDTH / 2, 190, TR("Klaar!", "Ready!"), &font_small, T_GRAY_VDARK, WHITE);
     display_flush();
     hal_delay_ms(300);
 }
 
 /* ── Storage at boot ──────────────────────────────────────────── */
 static void boot_message(const char *a, const char *b, const char *c) {
-    const uint16_t bg = RGB(20,0,0);
-    display_fill(bg);
-    display_str(10, 20, a, YELLOW, bg);
-    if (b) display_str(10, 36, b, WHITE, bg);
-    if (c) display_str(10, 52, c, WHITE, bg);
+    ui_message(TR("Opslag", "Storage"), a, b, c);
     display_flush();
 }
 

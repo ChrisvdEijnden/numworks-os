@@ -14,14 +14,15 @@
 #include "../../include/config.h"
 #include "../../ui/lang.h"
 #include "../settings/prefs.h"
+#include "../../ui/theme.h"
 #include <stdio.h>
 #include <string.h>
 
-#define TILE  48
+#define TILE  44
 #define GAP   4
 #define BX    ((LCD_WIDTH - 4 * TILE - 5 * GAP) / 2)
-#define BY    34
-#define C_BG  RGB(10,10,20)
+#define BY    (UI_TITLE_H + 4)
+#define FOOTER_H 20
 
 static uint8_t  s_board[4][4];
 static uint32_t s_score, s_rng;
@@ -90,7 +91,7 @@ static void add_tile(void) {
 
 static uint16_t tile_colour(int e) {
     static const uint16_t C[] = {
-        RGB(60,58,50), RGB(238,228,218), RGB(237,224,200), RGB(242,177,121), RGB(245,149,99),
+        RGB(205,193,180), RGB(238,228,218), RGB(237,224,200), RGB(242,177,121), RGB(245,149,99),
         RGB(246,124,95), RGB(246,94,59), RGB(237,207,114), RGB(237,204,97), RGB(237,200,80),
         RGB(237,197,63), RGB(237,194,46),
     };
@@ -98,34 +99,40 @@ static uint16_t tile_colour(int e) {
 }
 
 static void draw_tile(int r, int c) {
-    int e = s_board[r][c], x = BX + GAP + c * (TILE + GAP), y = BY + GAP + r * (TILE + GAP);
+    int e = s_board[r][c];
+    int16_t x = (int16_t)(BX + GAP + c * (TILE + GAP)), y = (int16_t)(BY + GAP + r * (TILE + GAP));
     uint16_t bg = tile_colour(e);
     display_fill_rect(x, y, TILE, TILE, bg);
     if (!e) return;
     char t[12];
     snprintf(t, sizeof t, "%lu", 1UL << e);
-    int w = (int)strlen(t) * 8;
-    display_str(x + (TILE - w) / 2, y + TILE / 2 - 4, t, e <= 2 ? RGB(110,100,90) : WHITE, bg);
+    const font_t *f = strlen(t) <= 4 ? &font_large : &font_small;
+    ui_text_center((int16_t)(x + TILE / 2), (int16_t)(y + (TILE - f->h) / 2), t, f,
+                   e <= 2 ? RGB(119,110,101) : WHITE, bg);
 }
 
 static void draw_score(void) {
-    display_fill_rect(0, 0, LCD_WIDTH, 26, RGB(160,120,40));
-    char b[48];
-    snprintf(b, sizeof b, TR("2048  score %lu  record %lu", "2048  score %lu  best %lu"),
-             (unsigned long)s_score, (unsigned long)g_prefs.best[BEST_2048]);
-    display_str(6, 9, b, WHITE, RGB(160,120,40));
+    char a[24], b[24];
+    snprintf(a, sizeof a, "score %lu", (unsigned long)s_score);
+    snprintf(b, sizeof b, TR("record %lu", "best %lu"), (unsigned long)g_prefs.best[BEST_2048]);
+    ui_title_bar_info("2048", a, b);
 }
 
 void g2048_redraw(void) {
-    display_fill(C_BG);
     draw_score();
-    display_fill_rect(BX, BY, 4 * TILE + 5 * GAP, 4 * TILE + 5 * GAP, RGB(120,110,100));
+    ui_body(WHITE);
+    display_fill_rect(BX, BY, 4 * TILE + 5 * GAP, 4 * TILE + 5 * GAP, RGB(187,173,160));
     for (int r = 0; r < 4; r++) for (int c = 0; c < 4; c++) draw_tile(r, c);
-    const char *msg = s_over ? TR("Geen zetten meer. OK:Opnieuw", "No moves left. OK:Again")
-                    : s_won ? TR("2048! Speel door of OK:Opnieuw", "2048! Play on, or OK:Again")
-                    : TR("Pijlen:Schuif  BACK:Spellen", "Arrows:Slide  BACK:Games");
-    display_str(8, LCD_HEIGHT - 26, msg, YELLOW, C_BG);
-    if (s_new_best) display_str(8, LCD_HEIGHT - 12, TR("Nieuw record!", "New best score!"), RGB(255,200,60), C_BG);
+    const char *msg = s_over ? TR("Geen zetten meer. OK:opnieuw", "No moves left. OK:again")
+                    : s_won ? TR("2048! Speel door of OK:opnieuw", "2048! Play on, or OK:again")
+                    : TR("Pijlen:schuif  BACK:spellen", "Arrows:slide  BACK:games");
+    display_fill_rect(0, LCD_HEIGHT - FOOTER_H, LCD_WIDTH, FOOTER_H, T_GRAY_BRIGHT);
+    display_hline(0, LCD_HEIGHT - FOOTER_H, LCD_WIDTH, T_GRAY_MIDDLE);
+    display_text(6, LCD_HEIGHT - FOOTER_H + 4, msg, &font_small, s_over || s_won ? T_TEXT : T_GRAY_VDARK,
+                 T_GRAY_BRIGHT);
+    if (s_new_best)
+        ui_text_right(LCD_WIDTH - 6, LCD_HEIGHT - FOOTER_H + 4, TR("Nieuw record!", "New best!"), &font_small,
+                      T_ORANGE, T_GRAY_BRIGHT);
 }
 
 void g2048_init(void) {

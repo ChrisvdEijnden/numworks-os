@@ -18,24 +18,18 @@
 #include "../../hal/keyboard.h"
 #include "../../include/config.h"
 #include "../../ui/lang.h"
+#include "../../ui/theme.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#define C_BG    RGB(10,10,20)
-#define C_HDR   RGB(30,80,200)
-#define C_EXPR  RGB(100,180,255)
-#define C_RES   WHITE
-#define C_ERR   RED
-#define C_SEL   RGB(50,50,90)
-#define C_INPUT RGB(20,20,35)
-
-#define HEADER_H 24
-#define ROW_H    18
-#define INPUT_Y  (LCD_HEIGHT - 44)          /* input box: 2 lines */
-#define HINT_Y   (LCD_HEIGHT - 12)
-#define HIST_ROWS ((INPUT_Y - HEADER_H - 2) / ROW_H)
-#define COLS     (LCD_WIDTH / 8 - 1)         /* characters per line */
+#define INPUT_H  37                                 /* the input bar at the bottom */
+#define INPUT_Y  (LCD_HEIGHT - INPUT_H)
+#define ROW_H    36                                 /* a calculation in the history */
+#define HIST_ROWS ((INPUT_Y - UI_TITLE_H) / ROW_H)
+#define PAD      10                                 /* left and right of the text */
+#define CW       10                                 /* large font: a character's width */
+#define COLS     ((LCD_WIDTH - 2 * PAD) / CW)       /* characters on a line */
 
 #define EXPR_MAX 127
 #define HIST_MAX CALC_HISTORY
@@ -48,68 +42,71 @@ static int  s_sel = -1;                      /* selected entry, -1: the input */
 static bool s_sel_result = true;             /* which part of it */
 static char s_expr[EXPR_MAX + 1];
 static int  s_elen;
-static char s_msg[48];                       /* error under the input */
+static char s_msg[48];                       /* an error, shown until the next key */
 static bool s_shift, s_alpha;
 
 /* ── Drawing ───────────────────────────────────────────────────── */
+/* Text on a row, shaded when it is the selected part */
+static void part(int16_t x, int16_t y, const char *t, bool selected) {
+    int16_t w = (int16_t)display_text_width(t, &font_large);
+    if (selected) display_fill_rect((int16_t)(x - 4), (int16_t)(y - 5), (int16_t)(w + 8), 28, T_SELECT);
+    display_text(x, y, t, &font_large, T_TEXT, selected ? T_SELECT : WHITE);
+}
+
 static void draw_row(int row, int idx) {
-    int y = HEADER_H + 2 + row * ROW_H;
-    bool sel = idx == s_sel;
-    uint16_t bg = sel ? C_SEL : C_BG;
-    display_fill_rect(0, y, LCD_WIDTH, ROW_H, bg);
+    int16_t y = (int16_t)(INPUT_Y - (HIST_ROWS - row) * ROW_H);
+    display_fill_rect(0, y, LCD_WIDTH, ROW_H, WHITE);
     if (idx < 0) return;
+    display_hline(0, (int16_t)(y + ROW_H - 1), LCD_WIDTH, T_GRAY_MIDDLE);
     const entry_t *e = &s_hist[idx];
+    bool sel = idx == s_sel;
     int rlen = (int)strlen(e->result);
     int room = COLS - rlen - 2;              /* characters left for the expression */
     char shown[COLS + 1];
     int elen = (int)strlen(e->expr);
     if (elen > room && room > 2) snprintf(shown, sizeof(shown), "%.*s..", room - 2, e->expr);
     else snprintf(shown, sizeof(shown), "%s", e->expr);
-    uint16_t ebg = (sel && !s_sel_result) ? RGB(80,80,160) : bg;
-    uint16_t rbg = (sel && s_sel_result)  ? RGB(80,80,160) : bg;
-    display_str(4, y + 5, shown, C_EXPR, ebg);
-    display_str(LCD_WIDTH - 4 - rlen * 8, y + 5, e->result, C_RES, rbg);
+    int16_t ty = (int16_t)(y + (ROW_H - 18) / 2);
+    part(PAD, ty, shown, sel && !s_sel_result);
+    part((int16_t)(LCD_WIDTH - PAD - rlen * CW), ty, e->result, sel && s_sel_result);
 }
 
 /* The history rows, newest just above the input. When an older entry
  * is selected the list scrolls so it stays visible. */
 static void draw_history(void) {
+    display_fill_rect(0, UI_TITLE_H, LCD_WIDTH, INPUT_Y - UI_TITLE_H - HIST_ROWS * ROW_H, WHITE);
     int bottom = s_nhist - 1;                /* entry shown on the last row */
     if (s_sel >= 0 && s_sel < s_nhist - HIST_ROWS + 1) bottom = s_sel + HIST_ROWS - 1;
     for (int row = HIST_ROWS - 1, idx = bottom; row >= 0; row--, idx--)
         draw_row(row, idx >= 0 ? idx : -1);
+    if (s_msg[0]) {                          /* the error, in a box in the middle */
+        int16_t w = (int16_t)(display_text_width(s_msg, &font_small) + 32), h = 44;
+        int16_t x = (int16_t)((LCD_WIDTH - w) / 2), y = (int16_t)(UI_TITLE_H + (INPUT_Y - UI_TITLE_H - h) / 2);
+        display_fill_rect(x, y, w, h, WHITE);
+        display_rect(x, y, w, h, T_GRAY_DARK);
+        ui_text_center(LCD_WIDTH / 2, (int16_t)(y + 15), s_msg, &font_small, T_TEXT, WHITE);
+    }
 }
 
 static void draw_input(void) {
-    display_fill_rect(0, INPUT_Y - 2, LCD_WIDTH, 2, RGB(60,60,90));
-    display_fill_rect(0, INPUT_Y, LCD_WIDTH, LCD_HEIGHT - INPUT_Y - 14, C_INPUT);
+    display_hline(0, INPUT_Y, LCD_WIDTH, T_GRAY_MIDDLE);
+    display_fill_rect(0, INPUT_Y + 1, LCD_WIDTH, INPUT_H - 1, WHITE);
     /* The end of a long expression stays visible */
     const char *shown = s_elen > COLS - 1 ? s_expr + (s_elen - (COLS - 1)) : s_expr;
-    char line[COLS + 2];
-    snprintf(line, sizeof(line), "%.*s%s", COLS - 1, shown, s_sel < 0 ? "_" : "");
-    display_str(4, INPUT_Y + 3, line, WHITE, C_INPUT);
-    if (s_msg[0]) display_str(4, INPUT_Y + 16, s_msg, C_ERR, C_INPUT);
-    char mode[16];
-    snprintf(mode, sizeof(mode), "%s%s", s_shift ? "SHIFT " : "", s_alpha ? "ALPHA" : "");
-    if (mode[0]) display_str(LCD_WIDTH - 4 - (int)strlen(mode) * 8, INPUT_Y + 16, mode, YELLOW, C_INPUT);
+    int16_t ty = INPUT_Y + 10;
+    display_text(PAD, ty, shown, &font_large, T_TEXT, WHITE);
+    if (s_sel < 0)                           /* the cursor */
+        display_fill_rect((int16_t)(PAD + (int)strlen(shown) * CW), (int16_t)(ty - 1), 1, 20, T_TEXT);
 }
 
-static void draw_hint(void) {
-    display_fill_rect(0, HINT_Y - 2, LCD_WIDTH, 14, C_BG);
-    display_str(4, HINT_Y, s_sel < 0
-        ? TR("EXE:=  UP:Geschiedenis  SHIFT:inverse", "EXE:=  UP:History  SHIFT:inverse")
-        : TR("OK:Gebruik  L/R:Som/Uitkomst  <-:Wis", "OK:Use  L/R:Calc/Result  <-:Delete"),
-        YELLOW, C_BG);
+static void draw_title(void) {
+    ui_title_bar_mods(TR("Rekenmachine", "Calculation"), s_shift, s_alpha);
 }
 
 void calculator_redraw(void) {
-    display_fill(C_BG);
-    display_fill_rect(0, 0, LCD_WIDTH, HEADER_H, C_HDR);
-    display_str(8, 6, TR("Rekenmachine", "Calculator"), WHITE, C_HDR);
-    display_str(LCD_WIDTH - 84, 6, TR("HOME:Terug", "HOME:Back"), RGB(180,200,255), C_HDR);
+    draw_title();
     draw_history();
     draw_input();
-    draw_hint();
 }
 
 /* ── History ───────────────────────────────────────────────────── */
@@ -180,7 +177,7 @@ void calculator_handle_event(const kernel_event_t *ev) {
         if (s_sel < 0) { s_sel = s_nhist - 1; s_sel_result = true; }
         else if (s_sel > 0) s_sel--;
         s_msg[0] = 0;
-        draw_history(); draw_input(); draw_hint();
+        draw_history(); draw_input();
         return;
     }
     if (s_sel >= 0) {
@@ -197,23 +194,22 @@ void calculator_handle_event(const kernel_event_t *ev) {
         } else {
             return;
         }
-        draw_history(); draw_input(); draw_hint();
+        draw_history(); draw_input();
         return;
     }
 
-    if (k == KEY_SHIFT) { s_shift = !s_shift; draw_input(); return; }
-    if (k == KEY_ALPHA) { s_alpha = !s_alpha; draw_input(); return; }
+    if (s_msg[0]) { s_msg[0] = 0; draw_history(); }   /* any key closes the error */
+    if (k == KEY_SHIFT) { s_shift = !s_shift; draw_title(); return; }
+    if (k == KEY_ALPHA) { s_alpha = !s_alpha; draw_title(); return; }
     if (k == KEY_DOWN) return;
 
     if (key_is_exe(k)) {
-        s_msg[0] = 0;
         evaluate();
         draw_history(); draw_input();
         return;
     }
     if (k == KEY_BACKSPACE) {
         if (s_elen > 0) s_expr[--s_elen] = 0;
-        s_msg[0] = 0;
         draw_input(); return;
     }
 
@@ -225,8 +221,7 @@ void calculator_handle_event(const kernel_event_t *ev) {
     else   ins = expr_key_text(k, s_shift);
     if (ins) {
         insert(ins);
-        s_shift = false;
-        s_msg[0] = 0;
+        if (s_shift) { s_shift = false; draw_title(); }
         draw_input();
     }
 }

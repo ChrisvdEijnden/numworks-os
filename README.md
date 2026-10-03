@@ -57,7 +57,7 @@ Navigate with the arrow keys, **OK** (or **EXE**) opens or confirms,
 - **ON/OFF** turns the screen and backlight off (and so does 5 minutes
   without a key press); ON/OFF turns them back on. While it's off the
   processor slows down to save the battery, unless USB is connected.
-- The home screen shows the battery level, with a bolt while charging;
+- The title bar shows the battery level, with a bolt while charging;
   with USB power the LED is orange while charging and green when full.
 - After a crash the screen shows the fault and its address; any key
   restarts. The same report goes to the debug UART. If the calculator
@@ -174,13 +174,22 @@ Linux PC, with the screen and a clickable keypad (needs SDL2: `brew
 install sdl2` or `apt install libsdl2-dev`). See *Simulator* in
 `docs/BUILD.md`.
 
+## Look
+
+The screens look like NumWorks' own software: a yellow title bar,
+light screens with white lists, purple tabs, and a home screen with
+app icons. The colours and sizes follow Epsilon; the code, the icons
+and the drawings are this OS's own, and text uses Source Code Pro. See
+*The look* in `docs/ARCHITECTURE.md`.
+
 ## Code design
 
 - Every app is a module in `apps/<name>/` with `init()`, `redraw()` and
   `handle_event()`; apps that work between key presses also have a
   `tick()` (Tetris, Shell).
 - All drawing goes into a framebuffer through `display_*()`; the kernel
-  sends the changed rectangle to the LCD (ST7789V).
+  sends the changed rectangle to the LCD (ST7789V). The title bar, tabs,
+  lists and colours shared by the apps are in `ui/theme.c`.
 - `kernel_set_app()` switches apps. Tasks sleep between ticks and the
   CPU waits in `WFI` when idle.
 
@@ -188,7 +197,9 @@ install sdl2` or `apt install libsdl2-dev`). See *Simulator* in
 
 The code in this repository is MIT licensed (see `LICENSE`).
 MicroPython (`make mp`) keeps its own license (MIT); the `random`
-module is adapted from MicroPython's.
+module is adapted from MicroPython's. The fonts in `ui/fonts.c` are
+rendered from Source Code Pro, © Adobe, under the SIL Open Font
+License 1.1 (`ui/fonts-LICENSE.txt`).
 
 Early versions of this repository contained a dump of NumWorks'
 firmware (`epsilon-qspi-backup.bin`). It isn't ours to distribute, and

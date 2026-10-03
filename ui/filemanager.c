@@ -6,20 +6,20 @@
  *
  * Layout:
  *   ┌──────────────────────────────────────────┐
- *   │ FILES              [1/8]      [BACK:HOME] │  ← header bar
- *   ├──────────────────────────────────────────┤
- *   │ > hello.py         1.2 KB                │  ← selected
- *   │   main.py          0.4 KB                │
- *   │   notes.txt        2.0 KB                │
- *   │   ...                                    │
- *   ├──────────────────────────────────────────┤
- *   │ OK:Edit  VAR:New  SHIFT:Del (twice)      │  ← hint bar
+ *   │ rad            FILES                 [=] │  ← title bar
+ *   │  ┌────────────────────────────────────┐  │
+ *   │  │ hello.py                   1.2 KB  │  │  ← selected, shaded
+ *   │  │ main.py                    0.4 KB  │  │
+ *   │  │ ...                                │  │
+ *   │  └────────────────────────────────────┘  │
+ *   │ OK:edit  VAR:new  SHIFT:delete      1/8  │  ← hint bar
  *   └──────────────────────────────────────────┘
  *
  * Code size target: < 5 KB
  * ================================================================ */
 #include "filemanager.h"
 #include "lang.h"
+#include "theme.h"
 #include "../hal/display.h"
 #include "../hal/keyboard.h"
 #include "../fs/flashfs.h"
@@ -29,12 +29,13 @@
 #include <string.h>
 #include <stdio.h>
 
-#define FM_VISIBLE_ROWS 12
-#define ITEM_H          16
-#define HEADER_H        20
-#define FOOTER_H        18
-#define LIST_Y          HEADER_H
+#define LIST_X          UI_MARGIN
+#define LIST_W          (LCD_WIDTH - 2 * UI_MARGIN)
+#define LIST_Y          (UI_TITLE_H + 8)
+#define ITEM_H          28
+#define FOOTER_H        20
 #define FOOTER_Y        (LCD_HEIGHT - FOOTER_H)
+#define FM_VISIBLE_ROWS ((FOOTER_Y - LIST_Y - 4) / ITEM_H)      /* 6 */
 
 typedef struct {
     char     name[FFS_NAME_LEN];
@@ -70,54 +71,64 @@ static void fm_load(void) {
 }
 
 /* ── Drawing ─────────────────────────────────────────────────── */
+/* A row of the list: the name, and the size on the right */
 static void draw_row(int row, int item_idx, bool selected) {
-    int y = LIST_Y + row * ITEM_H;
-    uint16_t bg = selected ? BLUE  : BLACK;
-    uint16_t fg = selected ? WHITE : GREEN;
-
-    display_fill_rect(0, y, LCD_WIDTH, ITEM_H, bg);
-
-    if (item_idx < s_nitem) {
-        char line[48];
-        uint32_t kb10 = (s_items[item_idx].size * 10) / 1024;
-        snprintf(line, sizeof(line), " %-22s %3lu.%lu KB",
-                 s_items[item_idx].name,
-                 (unsigned long)(kb10/10),
-                 (unsigned long)(kb10%10));
-        display_str(0, y + 3, line, fg, bg);
+    int16_t y = (int16_t)(LIST_Y + row * ITEM_H);
+    if (item_idx >= s_nitem) {
+        display_fill_rect(LIST_X, y, LIST_W, ITEM_H + 1, T_WALL);
+        if (item_idx == 0)
+            ui_text_center(LCD_WIDTH / 2, (int16_t)(y + 6), TR("Geen bestanden", "No files"), &font_large,
+                           T_GRAY_VDARK, T_WALL);
+        if (row > 0 && item_idx == s_nitem)        /* the last row's lower edge */
+            display_hline(LIST_X, y, LIST_W, T_GRAY_BRIGHT);
+        return;
     }
+    char name[FFS_NAME_LEN + 2], size[16];
+    int fit = (LIST_W - 20 - 70) / font_large.w;
+    snprintf(name, sizeof name, "%s", s_items[item_idx].name);
+    if ((int)strlen(name) > fit) strcpy(name + fit - 2, "..");
+    uint32_t kb10 = (s_items[item_idx].size * 10) / 1024;
+    snprintf(size, sizeof size, "%lu.%lu KB", (unsigned long)(kb10 / 10), (unsigned long)(kb10 % 10));
+    ui_row(LIST_X, y, LIST_W, ITEM_H + 1, name, size, selected);
 }
 
 static void draw_header(void) {
-    display_fill_rect(0, 0, LCD_WIDTH, HEADER_H, DKGREY);
-    char hdr[48];
-    snprintf(hdr, sizeof(hdr), TR(" BESTANDEN  %d/%d  [HOME=terug]", " FILES  %d/%d  [HOME=back]"), s_cursor+1, s_nitem);
-    display_str(0, 3, hdr, CYAN, DKGREY);
+    ui_title_bar(TR("Bestanden", "Files"));
+    ui_scrollbar(LCD_WIDTH - 6, LIST_Y, FM_VISIBLE_ROWS * ITEM_H, s_scroll, FM_VISIBLE_ROWS, s_nitem);
 }
 
+/* The grey banner at the bottom: keys, a question or a message */
 static void draw_footer(void) {
-    display_fill_rect(0, FOOTER_Y, LCD_WIDTH, FOOTER_H, DKGREY);
+    display_fill_rect(0, FOOTER_Y, LCD_WIDTH, FOOTER_H, T_GRAY_BRIGHT);
+    display_hline(0, FOOTER_Y, LCD_WIDTH, T_GRAY_MIDDLE);
+    int16_t ty = FOOTER_Y + 4;
     if (s_del_armed && s_nitem > 0) {
         char line[48];
         snprintf(line, sizeof(line), TR("Wis %s? SHIFT=ja", "Delete %s? SHIFT=yes"), s_items[s_cursor].name);
-        display_str(2, FOOTER_Y+3, line, RED, DKGREY);
-    } else if (s_msg[0]) {
-        display_str(2, FOOTER_Y+3, s_msg, CYAN, DKGREY);
-    } else {
-        display_str(2, FOOTER_Y+3, TR("OK:Bewerk  VAR:Nieuw  SHIFT:Wis  HOME:Terug",
-                                      "OK:Edit  VAR:New  SHIFT:Delete  HOME:Back"),
-                    YELLOW, DKGREY);
+        display_text(6, ty, line, &font_small, T_RED, T_GRAY_BRIGHT);
+        return;
     }
+    if (s_msg[0]) {
+        display_text(6, ty, s_msg, &font_small, T_TEXT, T_GRAY_BRIGHT);
+        return;
+    }
+    display_text(6, ty, TR("OK:bewerk  VAR:nieuw  SHIFT:wis", "OK:edit  VAR:new  SHIFT:delete"), &font_small,
+                 T_GRAY_VDARK, T_GRAY_BRIGHT);
+    char count[16];
+    snprintf(count, sizeof count, "%d/%d", s_nitem ? s_cursor + 1 : 0, s_nitem);
+    ui_text_right(LCD_WIDTH - 6, ty, count, &font_small, T_GRAY_VDARK, T_GRAY_BRIGHT);
+}
+
+static void draw_list(void) {
+    for (int r = 0; r < FM_VISIBLE_ROWS; r++) draw_row(r, s_scroll + r, (s_scroll + r) == s_cursor);
 }
 
 void fm_redraw(void) {
     fm_load();
-    display_fill(BLACK);
+    ui_body(T_WALL);
     draw_header();
     draw_footer();
-    for (int r = 0; r < FM_VISIBLE_ROWS; r++) {
-        draw_row(r, s_scroll + r, (s_scroll + r) == s_cursor);
-    }
+    draw_list();
 }
 
 /* ── Input ───────────────────────────────────────────────────── */
@@ -179,9 +190,7 @@ void fm_handle_event(const kernel_event_t *ev) {
 
     if (redraw) {
         draw_header();
-        for (int r = 0; r < FM_VISIBLE_ROWS; r++) {
-            draw_row(r, s_scroll + r, (s_scroll + r) == s_cursor);
-        }
+        draw_list();
         draw_footer();
     }
 }

@@ -19,17 +19,14 @@
 #include "../../hal/led.h"
 #include "../../hal/backlight.h"
 #include "../../ui/lang.h"
+#include "../../ui/theme.h"
 #include "prefs.h"
 #include "../../hal/fault.h"
 #include <string.h>
 #include <stdio.h>
 
-#define C_BG   RGB(10,10,20)
-#define C_HDR  RGB(60,60,80)
-#define C_SEL  RGB(50,50,90)
-#define C_BD   RGB(90,90,130)
-#define HEADER_H 28
-#define ROW_H    32
+#define ROW_TOP  (UI_TITLE_H + 12)
+#define ROW_STEP 38
 
 static led_colour_t s_lamp = LED_OFF;
 static int s_cursor = 0;
@@ -43,65 +40,53 @@ static const char *lamp_str(void) {
 }
 
 static uint16_t lamp_swatch(void) {
-    static const uint16_t SW[LED_COLOUR_COUNT] = { RGB(40,40,40), RED, GREEN, BLUE, WHITE };
+    static const uint16_t SW[LED_COLOUR_COUNT] = { T_GRAY_MIDDLE, T_RED, T_GREEN, T_BLUE, WHITE };
     return SW[s_lamp];
 }
 
 static void draw_row(int i) {
-    int y = HEADER_H + 10 + i*ROW_H;
-    bool sel = (i == s_cursor);
-    uint16_t bg = sel ? C_SEL : C_BG;
-    uint16_t bd = sel ? RGB(140,140,200) : C_BD;
-    display_fill_rect(4, y, LCD_WIDTH-8, ROW_H-4, bg);
-    display_rect     (4, y, LCD_WIDTH-8, ROW_H-4, bd);
-
+    int16_t x = UI_MARGIN, w = LCD_WIDTH - 2 * UI_MARGIN, y = (int16_t)(ROW_TOP + i * ROW_STEP);
+    bool sel = i == s_cursor;
+    uint16_t bg = sel ? T_SELECT : WHITE;
+    char value[40];
+    /* values that LEFT/RIGHT change show arrows while selected */
+    const char *fmt = sel ? "< %s >" : "%s";
     switch (i) {
-        case ROW_LAMP: {
-            char line[64];
-            snprintf(line, sizeof(line), TR("Lamp:  %s", "LED:   %s"), lamp_str());
-            display_str(10, y+8, line, WHITE, bg);
-            display_str(LCD_WIDTH-120, y+8, TR("L/R:Wissel", "L/R:Change"), RGB(180,220,180), bg);
-            display_fill_rect(LCD_WIDTH-30, y+6, 18, 18, lamp_swatch());
+        case ROW_LAMP:
+            snprintf(value, sizeof value, fmt, lamp_str());
+            ui_row(x, y, w, ROW_STEP + 1, TR("Lamp", "LED"), value, sel);
+            display_fill_rect((int16_t)(x + w - 34 - display_text_width(value, &font_small)), (int16_t)(y + 13),
+                              12, 12, lamp_swatch());
+            display_rect((int16_t)(x + w - 34 - display_text_width(value, &font_small)), (int16_t)(y + 13),
+                         12, 12, T_GRAY_DARK);
             break;
-        }
         case ROW_BRIGHT: {
-            char line[32];
-            snprintf(line, sizeof(line), TR("Helderheid: %2d/%d", "Brightness: %2d/%d"),
-                     backlight_level() + 1, BACKLIGHT_MAX + 1);
-            display_str(10, y+8, line, WHITE, bg);
-            int bx = LCD_WIDTH - 12 - (BACKLIGHT_MAX + 1) * 5;
+            snprintf(value, sizeof value, "%d/%d", backlight_level() + 1, BACKLIGHT_MAX + 1);
+            ui_row(x, y, w, ROW_STEP + 1, TR("Helderheid", "Brightness"), value, sel);
+            int16_t bx = (int16_t)(x + w - 52 - (BACKLIGHT_MAX + 1) * 5);
             for (int l = 0; l <= BACKLIGHT_MAX; l++)
-                display_fill_rect(bx + l*5, y+20-l, 4, 4+l,
-                                  l <= backlight_level() ? YELLOW : RGB(60,60,70));
+                display_fill_rect((int16_t)(bx + l * 5), (int16_t)(y + 27 - l), 4, (int16_t)(4 + l),
+                                  l <= backlight_level() ? T_YELLOW : T_GRAY_MIDDLE);
+            (void)bg;
             break;
         }
-        case ROW_LANG: {
-            char line[40];
-            snprintf(line, sizeof(line), TR("Taal:  %s", "Language: %s"), lang_name(g_lang));
-            display_str(10, y+8, line, WHITE, bg);
-            display_str(LCD_WIDTH-120, y+8, TR("L/R:Wissel", "L/R:Change"), RGB(180,220,180), bg);
+        case ROW_LANG:
+            snprintf(value, sizeof value, fmt, lang_name(g_lang));
+            ui_row(x, y, w, ROW_STEP + 1, TR("Taal", "Language"), value, sel);
             break;
-        }
         case ROW_VERSION:
-            display_str(10, y+8, TR("Versie: NumWorks OS v" NWOS_VERSION,
-                                    "Version: NumWorks OS v" NWOS_VERSION), WHITE, bg);
+            ui_row(x, y, w, ROW_STEP + 1, TR("Versie", "Version"), "NumWorks OS v" NWOS_VERSION, sel);
             break;
         case ROW_RESET:
-            display_str(10, y+8, TR("Systeem herstarten", "Restart"), RED, bg);
+            ui_row(x, y, w, ROW_STEP + 1, TR("Herstarten", "Restart"), sel ? "EXE" : NULL, sel);
             break;
     }
 }
 
 void settings_redraw(void) {
-    display_fill(C_BG);
-    display_fill_rect(0,0,LCD_WIDTH,HEADER_H,C_HDR);
-    display_str(8, 8, TR("Instellingen", "Settings"), WHITE, C_HDR);
-    display_str(LCD_WIDTH-82, 8, TR("HOME:Terug", "HOME:Back"), RGB(200,200,220), C_HDR);
-    for (int i=0; i<N_SETTINGS; i++) draw_row(i);
-    display_str(4, LCD_HEIGHT-12,
-                TR("UP/DOWN:Kies  L/R:Wijzig  EXE:Bevestig",
-                   "UP/DOWN:Select  L/R:Change  EXE:Confirm"),
-                YELLOW, C_BG);
+    ui_title_bar(TR("Instellingen", "Settings"));
+    ui_body(T_WALL);
+    for (int i = 0; i < N_SETTINGS; i++) draw_row(i);
 }
 
 void settings_init(void) { s_cursor=0; s_lamp=led_get(); }
@@ -111,8 +96,8 @@ void settings_handle_event(const kernel_event_t *ev) {
     key_code_t k = (key_code_t)ev->key;
 
     if (k==KEY_HOME||k==KEY_BACK) { prefs_save(); kernel_set_app(APP_HOME); return; }
-    if (k==KEY_UP   && s_cursor>0)            { s_cursor--; settings_redraw(); return; }
-    if (k==KEY_DOWN && s_cursor<N_SETTINGS-1) { s_cursor++; settings_redraw(); return; }
+    if (k==KEY_UP   && s_cursor>0)            { s_cursor--; draw_row(s_cursor + 1); draw_row(s_cursor); return; }
+    if (k==KEY_DOWN && s_cursor<N_SETTINGS-1) { s_cursor++; draw_row(s_cursor - 1); draw_row(s_cursor); return; }
 
     if (s_cursor == ROW_LAMP) {
         if (k==KEY_LEFT || k==KEY_RIGHT) {

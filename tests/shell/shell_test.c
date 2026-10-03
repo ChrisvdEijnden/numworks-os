@@ -5,16 +5,20 @@
 #include "../../kernel/kernel.h"
 #include "../../hal/keyboard.h"
 void shell_init(void); void shell_redraw(void); void shell_puts(const char*); void shell_handle_event(const kernel_event_t*);
+#include "../../hal/display.h"
 /* display stubs: remember the text drawn on each row */
 static char rows[300][128]; static int offscreen = 0, too_wide = 0;
-void display_str(int16_t x, int16_t y, const char *s, uint16_t fg, uint16_t bg) {
+void display_text_n(int16_t x, int16_t y, const char *s, int n, const font_t *f, uint16_t fg, uint16_t bg) {
     (void)fg; (void)bg;
-    if (y < 0 || y + 8 > 240) offscreen++;
-    if (x + (int)strlen(s) * 7 > 320 + 1) too_wide++;
-    if (y >= 0 && y < 300) snprintf(rows[y], sizeof rows[y], "%s", s);
+    if (y < 0 || y + f->h > 240) offscreen++;
+    if (x + n * f->w > 320 + 1) too_wide++;
+    if (y >= 0 && y < 300) snprintf(rows[y], sizeof rows[y], "%.*s", n, s);
 }
 void display_fill(uint16_t c) { (void)c; memset(rows, 0, sizeof rows); }
-void display_fill_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t c) { (void)x;(void)w;(void)c; for (int i = y; i < y + h && i < 300; i++) if (i >= 0) rows[i][0] = 0; }
+/* a wide fill clears the rows' text (a narrow one is the cursor) */
+void display_fill_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t c) { (void)x;(void)c; if (w < 100) return; for (int i = y; i < y + h && i < 300; i++) if (i >= 0) rows[i][0] = 0; }
+void display_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t c) { (void)x;(void)y;(void)w;(void)h;(void)c; }
+void display_hline(int16_t x, int16_t y, int16_t w, uint16_t c) { (void)x;(void)y;(void)w;(void)c; }
 void hal_uart_puts(const char *s) { (void)s; }
 int  hal_uart_getc(void) { return -1; }
 void cmd_run(const char *l) { (void)l; }
@@ -31,14 +35,14 @@ int main(void) {
     shell_redraw();
     int last_y = -1; char last[128] = "";
     for (int y = 0; y < 240; y++) if (strncmp(rows[y], "line ", 5) == 0) { last_y = y; snprintf(last, sizeof last, "%s", rows[y]); }
-    int input_y = -1; for (int y = 0; y < 300; y++) if (strstr(rows[y], "_")) input_y = y;
+    int input_y = -1; for (int y = 0; y < 300; y++) if (!strncmp(rows[y], "> ", 2)) input_y = y;
     printf("  last output line on screen: '%.10s' at y=%d\n", last, last_y);
     printf("  input line drawn at y=%d (screen is 240 high)\n", input_y);
     printf("  draws off-screen: %d, lines wider than the screen: %d\n", offscreen, too_wide);
     int fails = 0;
 #define CHECK(c, m) do { if (c) printf("  ok   %s\n", m); else { printf("  FAIL %s\n", m); fails++; } } while (0)
     CHECK(strncmp(last, "line 99", 7) == 0 && strspn(last + 7, " ") == strlen(last + 7), "the newest output line is on screen");
-    CHECK(input_y > last_y && input_y + 8 <= 240, "the input line sits below it, inside the screen");
+    CHECK(input_y > last_y && input_y + 14 <= 240, "the input line sits below it, inside the screen");
     CHECK(offscreen == 0, "nothing is drawn off-screen");
     CHECK(too_wide == 0, "no line is wider than the screen");
     printf("%s\n", fails ? "SOME TESTS FAILED" : "ALL PASSED");

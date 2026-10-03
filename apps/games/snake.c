@@ -13,18 +13,18 @@
 #include "../../include/config.h"
 #include "../../ui/lang.h"
 #include "../settings/prefs.h"
+#include "../../ui/theme.h"
 #include <stdio.h>
 #include <string.h>
 
 #define CELL     10
-#define OY       28                        /* playfield top */
+#define OY       (UI_TITLE_H + 6)          /* playfield top */
 #define OX       0
 #define CELLS    (SNAKE_W * SNAKE_H)
-#define C_BG     RGB(10,10,20)
-#define C_FIELD  RGB(16,24,16)
-#define C_SNAKE  RGB(80,220,80)
-#define C_HEAD   RGB(180,255,140)
-#define C_APPLE  RGB(255,60,60)
+#define C_FIELD  T_WALL
+#define C_SNAKE  T_GREEN
+#define C_HEAD   RGB(0x2E, 0x7D, 0x00)
+#define C_APPLE  T_RED
 
 static uint16_t s_body[CELLS];             /* ring buffer of cells, head at s_head */
 static int      s_head, s_len;
@@ -52,23 +52,23 @@ static void place_apple(void) {
 }
 
 static void draw_status(void) {
-    display_fill_rect(0, 0, LCD_WIDTH, OY - 2, RGB(30,120,60));
-    char b[48];
-    snprintf(b, sizeof b, TR("Snake  score %lu  record %lu", "Snake  score %lu  best %lu"),
-             (unsigned long)s_score, (unsigned long)g_prefs.best[BEST_SNAKE]);
-    display_str(6, 9, b, WHITE, RGB(30,120,60));
+    char a[24], b[24];
+    snprintf(a, sizeof a, "score %lu", (unsigned long)s_score);
+    snprintf(b, sizeof b, TR("record %lu", "best %lu"), (unsigned long)g_prefs.best[BEST_SNAKE]);
+    ui_title_bar_info("Snake", a, b);
 }
 
+/* A box in the middle of the field */
 static void message(const char *a, const char *b) {
-    display_fill_rect(40, 100, 240, 44, RGB(30,30,60));
-    display_rect(40, 100, 240, 44, RGB(140,140,200));
-    display_str(52, 108, a, WHITE, RGB(30,30,60));
-    if (b) display_str(52, 124, b, YELLOW, RGB(30,30,60));
+    display_fill_rect(30, 98, 260, 48, WHITE);
+    display_rect(30, 98, 260, 48, T_GRAY_MIDDLE);
+    ui_text_center(LCD_WIDTH / 2, b ? 106 : 115, a, &font_small, T_TEXT, WHITE);
+    if (b) ui_text_center(LCD_WIDTH / 2, 124, b, &font_small, T_ORANGE, WHITE);
 }
 
 void snake_redraw(void) {
-    display_fill(C_BG);
     draw_status();
+    ui_body(WHITE);
     display_fill_rect(OX, OY, SNAKE_W * CELL, SNAKE_H * CELL, C_FIELD);
     for (int i = 0; i < s_len; i++) {
         int c = s_body[(s_head - i + CELLS) % CELLS];

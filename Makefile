@@ -46,9 +46,11 @@ SRCS_C := \
     ui/filemanager.c \
     ui/line_input.c \
     ui/font.c \
+    ui/fonts.c \
+    ui/icons.c \
+    ui/theme.c \
     ui/lang.c \
     apps/settings/prefs.c \
-    ui/battery_icon.c \
     usb/usb_cdc.c \
     usb/usb_device.c \
     micropython-port/mp_port.c \

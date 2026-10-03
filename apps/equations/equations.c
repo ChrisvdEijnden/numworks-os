@@ -13,6 +13,7 @@
  * ================================================================ */
 #include "equations.h"
 #include "../../ui/lang.h"
+#include "../../ui/theme.h"
 #include "../../hal/display.h"
 #include "../../hal/keyboard.h"
 #include "../common/expr.h"
@@ -22,11 +23,11 @@
 #include <stdlib.h>
 #include <math.h>
 
-#define C_BG  RGB(10,10,20)
-#define C_HDR RGB(30,80,200)
-#define C_FLD RGB(30,30,50)
-#define C_SEL RGB(60,60,100)
-#define HEADER_H 28
+#define BODY_Y   (UI_TITLE_H + UI_TAB_H)       /* below the mode tabs */
+#define FIELD_Y  (BODY_Y + 26)                  /* the first input field */
+#define FIELD_H  30
+#define RESULT_Y (FIELD_Y + 3 * FIELD_H + 8)    /* the answers */
+#define HINT_Y   (LCD_HEIGHT - 16)
 
 typedef enum { MODE_QUAD, MODE_LINEAR, MODE_SINGLE, MODE_COUNT } eq_mode_t;
 static eq_mode_t s_mode = MODE_QUAD;
@@ -47,14 +48,13 @@ static bool s_editing = false;
 static bool s_shift   = false;
 
 static void show_results(void) {
-    int y = HEADER_H + 120;
-    display_fill_rect(0, y, LCD_WIDTH, LCD_HEIGHT-y, C_BG);
-    for (int i = 0; i < s_nresult && i < 6; i++) {
-        display_str(6, y + i*14, s_result[i], WHITE, C_BG);
-    }
+    display_fill_rect(0, RESULT_Y, LCD_WIDTH, HINT_Y - RESULT_Y, T_WALL);
+    for (int i = 0; i < s_nresult && i < 4; i++)
+        display_text(10, (int16_t)(RESULT_Y + i * 14), s_result[i], &font_small, T_TEXT, T_WALL);
 }
 
 static bool finite_(double v) { return !isnan(v) && !isinf(v); }
+static double nz(double v) { return v == 0.0 ? 0.0 : v; }   /* -0 prints as 0 */
 
 /* Evaluate a field ("1/3", "-sqrt(2)" ...); on failure, report it */
 static bool field_value(const char *src, const char *label, double *out) {
@@ -75,14 +75,14 @@ static void solve_quad(void) {
     if (a == 0) {
         if (b == 0) snprintf(s_result[s_nresult++], 64, c == 0 ? TR("Elke x is een oplossing", "Every x is a solution")
                                                                     : TR("Geen oplossing", "No solution"));
-        else snprintf(s_result[s_nresult++], 64, "x = %.10g", -c/b);
+        else snprintf(s_result[s_nresult++], 64, "x = %.10g", nz(-c/b));
     } else if (D > 0) {
         double r1 = (-b + sqrt(D)) / (2*a);
         double r2 = (-b - sqrt(D)) / (2*a);
-        snprintf(s_result[s_nresult++], 64, "x1 = %.10g", r1);
-        snprintf(s_result[s_nresult++], 64, "x2 = %.10g", r2);
+        snprintf(s_result[s_nresult++], 64, "x1 = %.10g", nz(r1));
+        snprintf(s_result[s_nresult++], 64, "x2 = %.10g", nz(r2));
     } else if (D == 0) {
-        snprintf(s_result[s_nresult++], 64, TR("x = %.10g  (dubbel)", "x = %.10g  (double)"), -b/(2*a));
+        snprintf(s_result[s_nresult++], 64, TR("x = %.10g  (dubbel)", "x = %.10g  (double)"), nz(-b/(2*a)));
     } else {
         double re = -b/(2*a), im = fabs(sqrt(-D)/(2*a));
         snprintf(s_result[s_nresult++], 64, "x1 = %.6g + %.6gi", re, im);
@@ -104,8 +104,8 @@ static void solve_linear(void) {
     } else {
         double x = (c*e - b*f) / det;
         double y = (a*f - c*d) / det;
-        snprintf(s_result[s_nresult++], 64, "x = %.10g", x);
-        snprintf(s_result[s_nresult++], 64, "y = %.10g", y);
+        snprintf(s_result[s_nresult++], 64, "x = %.10g", nz(x));
+        snprintf(s_result[s_nresult++], 64, "y = %.10g", nz(y));
     }
     show_results();
 }
@@ -143,7 +143,7 @@ static void solve_single(void) {
         }
         double fx = f_single(x);
         if (finite_(x) && finite_(fx) && fabs(fx) < 1e-9) {
-            snprintf(s_result[s_nresult++], 64, "x = %.10g", x);
+            snprintf(s_result[s_nresult++], 64, "x = %.10g", nz(x));
             snprintf(s_result[s_nresult++], 64, "f(x) = %.3g", fx);
             show_results();
             return;
@@ -174,67 +174,52 @@ static int field_count(void) {
     return (s_mode==MODE_QUAD) ? 3 : (s_mode==MODE_LINEAR) ? 6 : 1;
 }
 
+/* An input field: white, shaded when it is the current one, with the
+ * cursor while it is being edited */
+static void field(int16_t x, int16_t y, int16_t w, const char *label, const char *value, int idx, int chars) {
+    bool cur = s_field == idx, ed = cur && s_editing;
+    uint16_t bg = cur ? T_SELECT : WHITE;
+    display_fill_rect(x, y, w, FIELD_H + 1, bg);
+    display_rect(x, y, w, FIELD_H + 1, T_GRAY_BRIGHT);
+    char line[72];
+    snprintf(line, sizeof(line), "%s%s", label, tail(ed ? s_input : value, chars));
+    display_text((int16_t)(x + 8), (int16_t)(y + 6), line, &font_large, T_TEXT, bg);
+    if (ed) display_fill_rect((int16_t)(x + 8 + (int)strlen(line) * 10), (int16_t)(y + 5), 1, 20, T_TEXT);
+}
+
 static void draw_quad(void) {
     const char *labels[] = {"a=","b=","c="};
     char *vals[] = {s_quad_a, s_quad_b, s_quad_c};
-    display_str(6, HEADER_H+8, "ax^2 + bx + c = 0", YELLOW, C_BG);
-    for (int i = 0; i < 3; i++) {
-        int y = HEADER_H + 30 + i*26;
-        uint16_t bg = (s_field == i && s_editing) ? C_SEL : C_FLD;
-        display_fill_rect(4, y, LCD_WIDTH-8, 22, bg);
-        char line[72];
-        bool ed = (s_field==i && s_editing);
-        snprintf(line, sizeof(line), "%s %s%s", labels[i], tail(ed ? s_input : vals[i], 40),
-                 ed ? "_" : "");
-        display_str(8, y+5, line, WHITE, bg);
-    }
+    display_text(10, BODY_Y + 6, "ax^2 + bx + c = 0", &font_small, T_GRAY_VDARK, T_WALL);
+    for (int i = 0; i < 3; i++)
+        field(UI_MARGIN, (int16_t)(FIELD_Y + i * FIELD_H), LCD_WIDTH - 2 * UI_MARGIN, labels[i], vals[i], i, 25);
 }
-
 static void draw_linear(void) {
-    display_str(6, HEADER_H+8, TR("Lineair stelsel 2x2", "Linear system 2x2"), YELLOW, C_BG);
+    display_text(10, BODY_Y + 6, TR("ax+by=c  en  dx+ey=f", "ax+by=c  and  dx+ey=f"), &font_small, T_GRAY_VDARK, T_WALL);
     const char *lbl[] = {"a=","b=","c=","d=","e=","f="};
     char *vals[] = {s_lin[0],s_lin[1],s_lin[2],s_lin[3],s_lin[4],s_lin[5]};
-    for (int i = 0; i < 6; i++) {
-        int col = i / 3, row = i % 3;
-        int x = 4 + col*160, y = HEADER_H+30+row*26;
-        uint16_t bg = (s_field==i && s_editing) ? C_SEL : C_FLD;
-        display_fill_rect(x, y, 152, 22, bg);
-        char line[72];
-        bool ed = (s_field==i && s_editing);
-        /* 152-px column: 21 characters incl. label and cursor */
-        snprintf(line, sizeof(line), "%s%s%s", lbl[i], tail(ed ? s_input : vals[i], 18), ed ? "_" : "");
-        display_str(x+4, y+5, line, WHITE, bg);
-    }
-    display_str(6, HEADER_H+112, "ax+by=c  /  dx+ey=f", RGB(180,180,180), C_BG);
+    int16_t w = (LCD_WIDTH - 2 * UI_MARGIN) / 2;
+    for (int i = 0; i < 6; i++)
+        field((int16_t)(UI_MARGIN + (i / 3) * w), (int16_t)(FIELD_Y + (i % 3) * FIELD_H), w, lbl[i], vals[i], i, 11);
 }
-
 void equations_redraw(void) {
-    display_fill(C_BG);
-    display_fill_rect(0, 0, LCD_WIDTH, HEADER_H, C_HDR);
-    display_str(6, 8, TR("Vergelijkingen", "Equations"), WHITE, C_HDR);
-    /* Mode tabs */
     const char *tabs[] = {TR("Kwadratisch", "Quadratic"), TR("Lineair", "Linear"), TR("Enkelvoudig", "Single")};
-    for (int i = 0; i < 3; i++) {
-        uint16_t tc = (i==(int)s_mode) ? WHITE : RGB(150,150,200);
-        display_str(4 + i*107, HEADER_H+1, tabs[i], tc,
-                    (i==(int)s_mode) ? RGB(50,80,160) : C_BG);
-    }
+    ui_title_bar_mods(TR("Vergelijkingen", "Equations"), s_shift, false);
+    ui_tabs(UI_TITLE_H, tabs, 3, (int)s_mode, false);
+    display_fill_rect(0, BODY_Y, LCD_WIDTH, LCD_HEIGHT - BODY_Y, T_WALL);
     switch(s_mode) {
         case MODE_QUAD:   draw_quad();   break;
         case MODE_LINEAR: draw_linear(); break;
         default:
-            display_str(6, HEADER_H+30, TR("Vergelijking: f(x)=0", "Equation: f(x)=0"), YELLOW, C_BG);
-            display_fill_rect(4, HEADER_H+52, LCD_WIDTH-8, 22, s_editing?C_SEL:C_FLD);
-            {char line[72]; snprintf(line,sizeof(line),"%s%s",tail(s_editing?s_input:s_single,42),s_editing?"_":"");
-             display_str(8, HEADER_H+57, line, WHITE, s_editing?C_SEL:C_FLD);}
+            display_text(10, BODY_Y + 6, TR("Vergelijking: f(x)=0", "Equation: f(x)=0"), &font_small, T_GRAY_VDARK, T_WALL);
+            field(UI_MARGIN, FIELD_Y, LCD_WIDTH - 2 * UI_MARGIN, "", s_single, 0, 27);
             break;
     }
-    display_str(4, LCD_HEIGHT-14, s_editing ? TR("OK:Klaar  XNT: x  ALPHA:Annuleer", "OK:Done  XNT: x  ALPHA:Cancel")
-                                            : TR("OK:Los op  ALPHA:Bewerk  L/R:Modus", "OK:Solve  ALPHA:Edit  L/R:Mode"),
-                YELLOW, C_BG);
+    display_text(8, HINT_Y, s_editing ? TR("OK: klaar  XNT: x  ALPHA: annuleer", "OK: done  XNT: x  ALPHA: cancel")
+                                      : TR("OK: los op  ALPHA: bewerk  L/R: modus", "OK: solve  ALPHA: edit  L/R: mode"),
+                 &font_small, T_GRAY_VDARK, T_WALL);
     show_results();
 }
-
 void equations_init(void) { s_mode = MODE_QUAD; s_field = 0; s_editing = false; }
 
 void equations_handle_event(const kernel_event_t *ev) {

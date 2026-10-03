@@ -10,7 +10,8 @@
  *     --storage FILE   where the files are kept
  *                      (default ~/.numworks-sim/storage.bin)
  *     --fresh          start with empty storage, like a new calculator
- *     --scale N        window size: 1 (default), 2, ...
+ *     --scale F        window size, 1 = the drawing's own (800 x 1600);
+ *                      by default the window fits the screen
  *     --no-usb         no pseudo-terminal for PC transfer
  *     --script STEPS   run steps, then quit (see below)
  *     --headless       no window (with --script)
@@ -27,6 +28,7 @@
 #include <SDL.h>
 #include <ctype.h>
 #include <errno.h>
+#include <math.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -134,8 +136,8 @@ static key_code_t s_hold_key;
 static bool s_quit;
 static uint32_t s_shot[SIM_WIN_H * SIM_WIN_W];
 
-static void save_window(const char *path, const char *status) {
-    sim_window_draw(s_shot, status);
+static void save_window(const char *path) {
+    sim_window_draw(s_shot);
     if (sim_save_bmp(path, s_shot, SIM_WIN_W, SIM_WIN_H, SIM_WIN_W)) printf("sim: saved %s\n", path);
 }
 
@@ -145,7 +147,7 @@ static void save_screen(const char *path) {
     if (sim_save_bmp(path, &px[0][0], SIM_PANEL_W, SIM_PANEL_H, SIM_PANEL_W)) printf("sim: saved %s\n", path);
 }
 
-static void run_script(uint64_t now, const char *status) {
+static void run_script(uint64_t now) {
     if (!s_script || now < s_script_wait || !taps_idle()) return;
     if (s_hold_key != KEY_NONE) { sim_key(s_hold_key, false); s_hold_key = KEY_NONE; }
     while (*s_script == ';' || isspace((unsigned char)*s_script)) s_script++;
@@ -170,7 +172,7 @@ static void run_script(uint64_t now, const char *status) {
         else { sim_key(k, true); s_hold_key = k; s_script_wait = now + (uint64_t)ms * 1000U; }
     } else if (!strcmp(cmd, "type")) type_text(arg);
     else if (!strcmp(cmd, "uart")) { sim_uart_type(arg); sim_uart_type("\r"); }
-    else if (!strcmp(cmd, "shot")) save_window(arg, status);
+    else if (!strcmp(cmd, "shot")) save_window(arg);
     else if (!strcmp(cmd, "screen")) save_screen(arg);
     else if (!strcmp(cmd, "quit")) s_quit = true;
     else { fprintf(stderr, "sim: unknown script step '%s'\n", cmd); exit(2); }
@@ -194,7 +196,7 @@ static key_code_t held_key(SDL_Keycode k) {
 }
 
 static void usage(void) {
-    fputs("usage: numworks-sim [--storage FILE] [--fresh] [--scale N] [--no-usb]\n"
+    fputs("usage: numworks-sim [--storage FILE] [--fresh] [--scale F] [--no-usb]\n"
           "                    [--script STEPS] [--headless]\n", stderr);
     exit(2);
 }
@@ -209,7 +211,7 @@ static void default_storage(char *out, size_t n) {
 int main(int argc, char **argv) {
     char storage[1024] = "";
     bool fresh = false, headless = false, usb = true;
-    int scale = 1;
+    double scale = 0;                   /* 0: fit the screen */
     s_argv = calloc((size_t)argc + 1, sizeof *s_argv);
     int kept = 0;
     s_argv[kept++] = argv[0];
@@ -220,14 +222,14 @@ int main(int argc, char **argv) {
         if (!strcmp(opt, "--headless")) headless = true;
         else if (!strcmp(opt, "--no-usb")) usb = false;
         else if (val && !strcmp(opt, "--storage")) snprintf(storage, sizeof storage, "%s", val);
-        else if (val && !strcmp(opt, "--scale")) scale = atoi(val);
+        else if (val && !strcmp(opt, "--scale")) scale = atof(val);
         else if (val && !strcmp(opt, "--script")) s_script = strdup(val);
         else usage();
         if (strcmp(opt, "--headless") && strcmp(opt, "--no-usb")) s_argv[kept++] = argv[++i];
     }
     if (headless && !s_script) usage();
     s_scripted = s_script != NULL;
-    if (scale < 1) scale = 1;
+    if (scale < 0.1 || scale > 4) scale = 0;
     if (!storage[0]) default_storage(storage, sizeof storage);
     if (!sim_storage_open(storage, fresh)) return 1;
     sim_usb_enable(usb);
@@ -236,10 +238,19 @@ int main(int argc, char **argv) {
     SDL_Renderer *ren = NULL;
     SDL_Texture *tex = NULL;
     if (!headless) {
-        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
         if (SDL_Init(SDL_INIT_VIDEO) != 0) { fprintf(stderr, "sim: %s\n", SDL_GetError()); return 1; }
+        SDL_Rect usable;
+        if (scale == 0) {                    /* as large as fits, at most half the drawing (2x on Retina) */
+            scale = 0.5;
+            if (SDL_GetDisplayUsableBounds(0, &usable) == 0) {
+                double fit = fmin(0.94 * usable.h / SIM_WIN_H, 0.94 * usable.w / SIM_WIN_W);
+                if (fit < scale) scale = fit;
+            }
+        }
         win = SDL_CreateWindow("NumWorks OS simulator", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                               SIM_WIN_W * scale, SIM_WIN_H * scale, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+                               (int)(SIM_WIN_W * scale), (int)(SIM_WIN_H * scale),
+                               SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
         if (win) ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_PRESENTVSYNC);
         if (win && !ren) ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
         if (ren) {
@@ -248,6 +259,11 @@ int main(int argc, char **argv) {
         }
         if (!tex) { fprintf(stderr, "sim: no window: %s\n", SDL_GetError()); return 1; }
         SDL_StartTextInput();
+        printf("sim: files in %s\n"
+               "sim: keys: arrows, Enter = EXE, Tab = OK, Esc = BACK, Backspace = DEL, F1/Home = HOME,\n"
+               "sim:   F2/End = ON/OFF, Ctrl = shift, Alt/Option = alpha; a character presses the key\n"
+               "sim:   that carries it (letters: their alpha key). Or click the keys.\n", storage);
+        fflush(stdout);
     }
 
     /* The OS, on its own stack */
@@ -262,13 +278,19 @@ int main(int argc, char **argv) {
     }
 
     static uint32_t fb[SIM_WIN_H * SIM_WIN_W];
-    char status[256];
+    const char *shown_port = NULL;
     key_code_t mouse_key = KEY_NONE;
     uint64_t next_frame = 0;
     while (!s_quit) {
         uint64_t now = sim_now_us();
         const char *port = sim_usb_port();
-        snprintf(status, sizeof status, "Files: %s%s%s", storage, port ? "    PC transfer: " : "", port ? port : "");
+        if (win && port != shown_port) {    /* the PC transfer port, in the title */
+            char title[256];
+            snprintf(title, sizeof title, "NumWorks OS simulator%s%s", port ? "  -  PC transfer: " : "",
+                     port ? port : "");
+            SDL_SetWindowTitle(win, title);
+            shown_port = port;
+        }
 
         SDL_Event e;
         while (win && SDL_PollEvent(&e)) {
@@ -300,10 +322,10 @@ int main(int argc, char **argv) {
             }
         }
         run_taps(now);
-        run_script(now, status);
+        run_script(now);
         if (win && now >= next_frame) {
             next_frame = now + 16000;
-            sim_window_draw(fb, status);
+            sim_window_draw(fb);
             SDL_UpdateTexture(tex, NULL, fb, SIM_WIN_W * 4);
             SDL_RenderClear(ren);
             SDL_RenderCopy(ren, tex, NULL, NULL);

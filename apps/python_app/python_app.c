@@ -15,6 +15,7 @@
  * ================================================================ */
 #include "python_app.h"
 #include "../../ui/lang.h"
+#include "../../ui/theme.h"
 #include "../../hal/display.h"
 #include "../../hal/keyboard.h"
 #include "../../ui/line_input.h"
@@ -23,18 +24,12 @@
 #include <string.h>
 #include <stdio.h>
 
-#define C_BG   RGB(10,10,20)
-#define C_HDR  RGB(30,150,30)
-#define C_INPT RGB(20,20,35)
-#define C_FOOT RGB(20,60,20)
-#define HEADER_H 24
-#define FOOTER_H 14
-#define INPUT_H  14
-#define CHAR_W   7
-#define LINE_H   12
-#define COLS     ((LCD_WIDTH - 4) / CHAR_W)                                /* 45 */
-#define OROWS    ((LCD_HEIGHT - HEADER_H - INPUT_H - FOOTER_H) / LINE_H)  /* 15 */
-#define INPUT_Y  (LCD_HEIGHT - FOOTER_H - INPUT_H)
+#define TOP      (UI_TITLE_H + 4)
+#define INPUT_H  24
+#define LINE_H   14
+#define COLS     ((LCD_WIDTH - 8) / 7)                         /* 44 */
+#define OROWS    ((LCD_HEIGHT - TOP - INPUT_H) / LINE_H)       /* 13 */
+#define INPUT_Y  (LCD_HEIGHT - INPUT_H)
 #define LINE_MAX 128          /* one input line */
 #define BLOCK_MAX 1024        /* a whole multi-line entry */
 
@@ -79,31 +74,24 @@ static void draw_output(void) {
     int first = s_nout - (OROWS - 1);
     for (int r = 0; r < OROWS; r++) {
         int li = first + r;
-        int y  = HEADER_H + r * LINE_H;
-        display_fill_rect(0, y, LCD_WIDTH, LINE_H, C_BG);
-        if (li >= 0) display_str(2, y + 2, s_out[li % OROWS], RGB(180,255,180), C_BG);
+        int16_t y = (int16_t)(TOP + r * LINE_H);
+        display_fill_rect(0, y, LCD_WIDTH, LINE_H, WHITE);
+        if (li >= 0) display_text(4, y, s_out[li % OROWS], &font_small, T_TEXT, WHITE);
     }
 }
 
 /* ── Input line ───────────────────────────────────────────────── */
 static void draw_line(const char *prompt, const char *text, bool shift, bool alpha) {
-    display_fill_rect(0, INPUT_Y, LCD_WIDTH, INPUT_H, C_INPT);
-    const char *mode = alpha ? (shift ? "ABC" : "abc") : (shift ? "SHF" : "");
+    ui_title_bar_mods("Python", shift, alpha);
+    display_fill_rect(0, INPUT_Y, LCD_WIDTH, INPUT_H, WHITE);
+    display_hline(0, INPUT_Y, LCD_WIDTH, T_GRAY_MIDDLE);
     int pl = (int)strlen(prompt);
-    int room = COLS - pl - 1 - 4;         /* prompt, cursor, mode */
+    int room = COLS - pl - 1;             /* prompt, cursor */
     int n = (int)strlen(text);
     char vis[COLS+1];
-    snprintf(vis, sizeof(vis), "%s%s_", prompt, n > room ? text + n - room : text);
-    display_str(2, INPUT_Y + 3, vis, WHITE, C_INPT);
-    display_str(LCD_WIDTH - 2 - 3 * CHAR_W, INPUT_Y + 3, mode, RGB(150,200,150), C_INPT);
-}
-
-static void draw_footer(void) {
-    display_fill_rect(0, LCD_HEIGHT - FOOTER_H, LCD_WIDTH, FOOTER_H, C_FOOT);
-    display_str(4, LCD_HEIGHT - FOOTER_H + 3,
-                s_cont ? TR("Lege regel + EXE: blok uitvoeren", "Empty line + EXE: run the block")
-                       : TR("EXE:Uitvoeren ALPHA:Letters HOME:Terug", "EXE:Run  ALPHA:Letters  HOME:Back"),
-                YELLOW, C_FOOT);
+    snprintf(vis, sizeof(vis), "%s%s", prompt, n > room ? text + n - room : text);
+    display_text(4, INPUT_Y + 6, vis, &font_small, T_TEXT, WHITE);
+    display_fill_rect((int16_t)(4 + (int)strlen(vis) * font_small.w), INPUT_Y + 5, 1, 16, T_TEXT);
 }
 
 static void draw_input(void) {
@@ -154,8 +142,9 @@ static void set_line(const char *text) {
 
 static void run_block(void) {
     if (s_left) { mp_forget_imports(); s_left = false; }
-    display_fill_rect(0, INPUT_Y, LCD_WIDTH, INPUT_H, C_INPT);
-    display_str(2, INPUT_Y + 3, TR("Bezig...  BACK stopt", "Running...  BACK stops"), RGB(150,200,150), C_INPT);
+    display_fill_rect(0, INPUT_Y + 1, LCD_WIDTH, INPUT_H - 1, WHITE);
+    display_text(4, INPUT_Y + 6, TR("Bezig...  BACK stopt", "Running...  BACK stops"), &font_small, T_GRAY_VDARK,
+                 WHITE);
     mp_set_console(&s_console);
     mp_exec_repl(s_block);
     mp_set_console(NULL);
@@ -199,13 +188,9 @@ static void enter_line(void) {
 
 /* ── App interface ────────────────────────────────────────────── */
 void python_app_redraw(void) {
-    display_fill(C_BG);
-    display_fill_rect(0, 0, LCD_WIDTH, HEADER_H, C_HDR);
-    display_str(6, 8, "Python", WHITE, C_HDR);
-    display_str(LCD_WIDTH - 84, 8, TR("HOME:Terug", "HOME:Back"), RGB(180,255,180), C_HDR);
+    ui_body(WHITE);
     draw_output();
     draw_input();
-    draw_footer();
 }
 
 void python_app_init(void) {

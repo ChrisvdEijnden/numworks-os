@@ -18,6 +18,7 @@
 #include "../hal/hal.h"
 #include "../hal/keyboard.h"
 #include "../hal/display.h"
+#include "../ui/theme.h"
 #include "../fs/flashfs.h"
 
 /* ── Consoles ─────────────────────────────────────────────────── */
@@ -73,8 +74,10 @@ static void begin_run(void) {
 void mp_pause_after_graphics(void) {
     if (!s_graphics) return;
     s_graphics = false;
-    display_fill_rect(0, LCD_HEIGHT - 12, LCD_WIDTH, 12, BLACK);
-    display_str(4, LCD_HEIGHT - 10, TR("Druk op een toets om verder te gaan", "Press a key to continue"), GREY, BLACK);
+    display_fill_rect(0, LCD_HEIGHT - 18, LCD_WIDTH, 18, T_GRAY_BRIGHT);
+    display_hline(0, LCD_HEIGHT - 18, LCD_WIDTH, T_GRAY_MIDDLE);
+    ui_text_center(LCD_WIDTH / 2, LCD_HEIGHT - 16, TR("Druk op een toets om verder te gaan", "Press a key to continue"),
+                   &font_small, T_GRAY_VDARK, T_GRAY_BRIGHT);
     display_flush();
     key_event_t ev;
     for (;;) {

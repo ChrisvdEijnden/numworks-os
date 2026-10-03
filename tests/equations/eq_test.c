@@ -4,11 +4,16 @@
 #include <stdbool.h>
 #include "../../kernel/kernel.h"
 #include "../../hal/keyboard.h"
-/* display stubs: remember result lines (drawn in white below the fields) */
+#include "../../hal/display.h"
+/* display stubs: remember result lines (drawn in black below the fields) */
+extern const int eqt_result_y, eqt_hint_y;
 static char lines[16][80]; static int nlines;
-void display_str(int16_t x, int16_t y, const char *s, uint16_t fg, uint16_t bg) { (void)x;(void)bg; if (fg == 0xFFFF && y >= 148 && nlines < 16) snprintf(lines[nlines++], 80, "%s", s); }
+void display_text_n(int16_t x, int16_t y, const char *s, int n, const font_t *f, uint16_t fg, uint16_t bg) {
+    (void)x;(void)f;(void)bg; if (fg == 0 && y >= eqt_result_y && y < eqt_hint_y && nlines < 16) snprintf(lines[nlines++], 80, "%.*s", n, s); }
 void display_fill(uint16_t c) { (void)c; }
-void display_fill_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t c) { (void)x;(void)w;(void)h;(void)c; if (y >= 148) nlines = 0; }
+void display_fill_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t c) { (void)x;(void)w;(void)h;(void)c; if (y >= eqt_result_y && y < eqt_hint_y) nlines = 0; }
+void display_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t c) { (void)x;(void)y;(void)w;(void)h;(void)c; }
+void display_hline(int16_t x, int16_t y, int16_t w, uint16_t c) { (void)x;(void)y;(void)w;(void)c; }
 void kernel_set_app(app_state_t a) { (void)a; }
 char key_to_char(key_code_t k, bool s, bool a) { (void)k;(void)s;(void)a; return 0; }
 void equations_init(void); void equations_handle_event(const kernel_event_t *ev);
